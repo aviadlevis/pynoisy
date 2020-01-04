@@ -68,8 +68,8 @@ void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e
 void advection_velocity(double x, double y, double va[2])
 {
 
-    double vx = 1. ;
-    double vy = 0.3 ;
+    double vx = 0. ;
+    double vy = 0. ;
 
     va[0] = vx ;
     va[1] = vy ; 
