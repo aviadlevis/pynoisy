@@ -22,8 +22,8 @@ Two models are currently available.  Choose a model by editing
     are all space dependent.  Forcing is white noise in space *and* time.
 
 Follows Lee & Gammie 2020, based on
-[Lindgren, Rue, and Lindstrom 2011, J.R. Statist. Soc. B 73, pp 423-498]
-(https://rss.onlinelibrary.wiley.com/doi/10.1111/j.1467-9868.2011.00777.x)
+[Lindgren, Rue, and Lindstrom 2011](https://rss.onlinelibrary.wiley.com/doi/10.1111/j.1467-9868.2011.00777.x)
+J.R. Statist. Soc. B 73, pp 423-498.
 
 In particular, noisy implements eq. 17, which has power spectrum given by 
 eq. 18.
