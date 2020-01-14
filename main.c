@@ -45,7 +45,6 @@ int main(int argc, char *argv[])
     /* so diffusion coefficient is l^2/t */
 
     int i,j ;
-    double x,y;
     double Dtl = tf/400.;   /* image file output cadence */
     void apply_envelope(double del[][N], double fake_image[][N]);
     void emit_image(double fake_image[][N], int n);
@@ -72,7 +71,10 @@ int main(int argc, char *argv[])
     fprintf(stderr,"dt,dtdiff,dtadv: %g %g %g\n",dt, dtdiff, dtadv);
 
     /* initial conditions (typically zero) */
+    /*
     double sigsq = 0.1*0.1 ;
+    double x,y;
+    */
     gsl_rng * r;
     r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
     gsl_rng_set(r, 0);

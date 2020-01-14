@@ -23,8 +23,7 @@ CFG 22 Dec 2019
 
 #include "noisy.h"
 
-/*** this next bit describes the model ***/
-
+/* correlation length is proportional to local radius */
 double correlation_length(double x,double y)
 {
     double r = sqrt( (x*x + y*y)/(PARAM_RCH*PARAM_RCH) );
@@ -33,6 +32,7 @@ double correlation_length(double x,double y)
 
 }
 
+/* correlation time is proportional to the local Keplerian time */
 double correlation_time(double x,double y)
 {
     double W_Keplerian(double x, double y);
@@ -49,7 +49,7 @@ double diffusion_coefficient(double x,double y)
     double t = correlation_time(x, y);
     double K = l*l/t;
 
-    return( K );
+    return( 2.*K );
 }
 
 /* return principal axes of diffusion tensor */
@@ -74,7 +74,11 @@ void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e
 double W_Keplerian(double x, double y)
 {
 
-    double W0 = -1. * 2.*M_PI * 2.;
+    /* negative W0 turn clockwise on image */
+    /* 2.*M_PI allows W to be expressed in terms of orbital period */
+    double direction = -1. ;
+    double period = 1. ;
+    double W0 = direction * 2.*M_PI / period ;
 
     /* Keplerian velocity field */
     double r = sqrt(x*x + y*y)/PARAM_RCH + 0.5;
@@ -104,12 +108,16 @@ void advection_velocity(double x, double y, double va[2])
 }
 
 /* return angle of principle axes of diffusion tensor
-   with respect to local radius vector */
+   with respect to local radius vector.
+
+   this can be used to adjust the opening angle of spirals */
 
 double phi_func(double x, double y)
 {
     double phi0 = atan2(y, x);
-    double phi = phi0 + 0.2*M_PI;
+    double opening_angle = 0.3*M_PI;
+    double phi = phi0 + opening_angle ;
+
     return(phi);
 }
 
@@ -135,7 +143,7 @@ void noise_model(double del_noise[][N], double dt)
     static int first_call = 1;
     static gsl_rng * r;
 
-    /* white noise in time model */
+    /* white noise in space and time model */
 #if 1
     if(first_call) {
         r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
@@ -150,7 +158,7 @@ void noise_model(double del_noise[][N], double dt)
 #endif
 
 #if 0
-    /* static model */
+    /* white noise in space, static in time model */
     static double save_noise[N][N];
     if(first_call) {
         r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */

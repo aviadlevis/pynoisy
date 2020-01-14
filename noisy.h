@@ -28,7 +28,7 @@ CFG 22 Dec 2019
 #include <gsl/gsl_randist.h>
 
 /* size of image.  notice that solution time scales as N^4 */
-#define N  128
+#define N  256
 
 #define SMALL   1.e-10
 
@@ -39,5 +39,5 @@ CFG 22 Dec 2019
 #define PARAM_LAM   0.5     /* ratio of correlation length to local radius */
 #define PARAM_TAU   1.0     /* product of correlation time and local Keplerian frequency */
 #define PARAM_RCH   0.2     /* scaling radius */
-#define PARAM_RAT   0.2     /* ratio of diffusion coefficients */
+#define PARAM_RAT   0.1     /* ratio of diffusion coefficients */
 
