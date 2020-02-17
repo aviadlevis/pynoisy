@@ -5,7 +5,7 @@
 CC = gcc
 CFLAGS = -Wall -Ofast -fopenmp
 #CFLAGS = -Wall -Ofast 
-LDFLAGS = -lm -lgsl
+LDFLAGS = -lm -lgsl -lgslcblas
 
 # source, object, and include (.h) files
 SRCS = main.c image.c model_disk.c evolve.c
