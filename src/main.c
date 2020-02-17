@@ -23,17 +23,17 @@ CFG 22 Dec 2019
 
 #include "noisy.h"
 
-int main(int argc, char *argv[])
+int cmain(void)
 {
-    static double del[N][N];
+    static double _del[N][N];
     static double fake_image[N][N];
     void grid_function_calc(double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4], 
         double v[][N][4][2], double T[][N], double *Kmax, double *Vmax) ;
-    void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4],
+    void evolve_diffusion(double _del[][N], double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4],
         double dt);
-    void evolve_advection(double del[][N], double v[][N][4][2], double dt);
-    void evolve_decay(double del[][N], double T[][N], double dt);
-    void evolve_noise(double del[][N], double dt);
+    void evolve_advection(double _del[][N], double v[][N][4][2], double dt);
+    void evolve_decay(double _del[][N], double T[][N], double dt);
+    void evolve_noise(double _del[][N], double dt);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 
     int i,j ;
     double Dtl = tf/400.;   /* image file output cadence */
-    void apply_envelope(double del[][N], double fake_image[][N]);
+    void apply_envelope(double _del[][N], double fake_image[][N]);
     void emit_image(double fake_image[][N], int n);
     void ij_to_xy(int i, int j, double *x, double *y);
 
@@ -82,10 +82,10 @@ int main(int argc, char *argv[])
     for(j=0;j<N;j++) {
         /*
         ij_to_xy(i,j,&x,&y);
-        del[i][j] = exp(-0.5*(x*x + y*y)/sigsq)/(2.*M_PI*sigsq) ;
-        del[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r,1.0);
+        _del[i][j] = exp(-0.5*(x*x + y*y)/sigsq)/(2.*M_PI*sigsq) ;
+        _del[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r,1.0);
         */
-        del[i][j] = 0.;
+        _del[i][j] = 0.;
     }
     /*
     double delavg;
@@ -95,12 +95,12 @@ int main(int argc, char *argv[])
         im = (i+N-1)%N ;
         jp = (j+N+1)%N ;
         jm = (j+N-1)%N ;
-        delavg = 0.25*(del[ip][j] + del[i][jp] + del[im][j] + del[i][jm]);
+        delavg = 0.25*(_del[ip][j] + _del[i][jp] + _del[im][j] + _del[i][jm]);
         ddel[i][j] = delavg;
     }
     for(i=0;i<N;i++) 
     for(j=0;j<N;j++) 
-        del[i][j] = ddel[i][j];
+        _del[i][j] = ddel[i][j];
     */
 
 
@@ -117,11 +117,11 @@ int main(int argc, char *argv[])
             /* check rms of random field */
             rms = 0.;
             for(i=0;i<N;i++)
-            for(j=0;j<N;j++) rms += del[i][j]*del[i][j];
+            for(j=0;j<N;j++) rms += _del[i][j]*_del[i][j];
             rms = sqrt(rms)/N;
 
             /* transform random field into image */
-            apply_envelope(del, fake_image);
+            apply_envelope(_del, fake_image);
 
             /* get light curve */
             F = 0.;
@@ -138,10 +138,10 @@ int main(int argc, char *argv[])
         }
 
         /* operator split */
-        evolve_noise(del, dt);
-        evolve_diffusion(del, F_coeff_gradx, F_coeff_grady, dt) ;
-        evolve_advection(del, v, dt) ;
-        evolve_decay(del, T, dt);
+        evolve_noise(_del, dt);
+        evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt) ;
+        evolve_advection(_del, v, dt) ;
+        evolve_decay(_del, T, dt);
 
         nstep++;
         t += dt;
@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
     if(fp == NULL) exit(1);
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) 
-        fprintf(fp,"%d %d %lf\n",i,j,del[i][j]);
+        fprintf(fp,"%d %d %lf\n",i,j,_del[i][j]);
 
 }
 
@@ -170,7 +170,7 @@ void ij_to_xy(int i, int j, double *x, double *y)
 
 /* transform random field into fake image */
 
-void apply_envelope(double del[][N], double fake_image[][N])
+void apply_envelope(double _del[][N], double fake_image[][N])
 {
 
     int i,j;
@@ -181,7 +181,7 @@ void apply_envelope(double del[][N], double fake_image[][N])
     for(i=0;i<N;i++) 
     for(j=0;j<N;j++) {
         ij_to_xy(i,j,&x,&y);
-        fake_image[i][j] = envelope(x,y)*exp(-PARAM_AMP*del[i][j]);
+        fake_image[i][j] = envelope(x,y)*exp(-PARAM_AMP*_del[i][j]);
     }
 }
 

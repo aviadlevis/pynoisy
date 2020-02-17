@@ -51,7 +51,7 @@ modified 17 June 2012 CFG
     CFG 14 Sept 07: modified to go from almost-min to almost-max
 
 ******************************************************************************/
-void emit_image(double del[][N], int n)
+void emit_image(double dell[][N], int n)
 {
 	int i ;
 	double max, min ;
@@ -81,7 +81,7 @@ void emit_image(double del[][N], int n)
     k = 0;
     for (i = 0; i < N; i++)
     for (j = 0; j < N; j++) {
-        f[k] = del[i][j];
+        f[k] = dell[i][j];
         k++;
     }
 

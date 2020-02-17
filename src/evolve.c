@@ -105,7 +105,7 @@ void grid_function_calc(
     }
 }
 
-void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4], 
+void evolve_diffusion(double _del[][N], double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4], 
     double dt)
 {
 
@@ -116,7 +116,7 @@ void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_co
     int i,j,ip,jp,im,jm;
 
 #pragma omp parallel \
-  shared ( del, ddel, dx, dy, F_coeff_gradx, F_coeff_grady ) \
+  shared ( _del, ddel, dx, dy, F_coeff_gradx, F_coeff_grady ) \
   private (i, j, ip, im, jp, jm, gradx, grady, \
            Fxp, Fxm, Fyp, Fym, deldiff)
 {
@@ -132,10 +132,10 @@ void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_co
         /* F = -K1 e1 (e1 . grad) - K2 e2 (e2 . grad) */
         /* gradient, centered at ...  */
         /* upper x face */
-        gradx = (del[ip][j] - del[i][j])/dx;
+        gradx = (_del[ip][j] - _del[i][j])/dx;
         grady = 0.5*(
-            (del[i][jp] - del[i][jm])/(2.*dy) +
-            (del[ip][jp] - del[ip][jm])/(2.*dy) 
+            (_del[i][jp] - _del[i][jm])/(2.*dy) +
+            (_del[ip][jp] - _del[ip][jm])/(2.*dy) 
             );
         Fxp = -(
             F_coeff_gradx[i][j][0]*gradx +
@@ -144,20 +144,20 @@ void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_co
 
         /* upper y face */
         gradx = 0.5*(
-            (del[ip][j] - del[im][j])/(2.*dx) +
-            (del[ip][jp] - del[im][jp])/(2.*dx) 
+            (_del[ip][j] - _del[im][j])/(2.*dx) +
+            (_del[ip][jp] - _del[im][jp])/(2.*dx) 
             );
-        grady = (del[i][jp] - del[i][j])/dy;
+        grady = (_del[i][jp] - _del[i][j])/dy;
         Fyp = -(
             F_coeff_gradx[i][j][1]*gradx +
             F_coeff_grady[i][j][1]*grady 
             );
 
         /* lower x face */
-        gradx = (del[i][j] - del[im][j])/dx;
+        gradx = (_del[i][j] - _del[im][j])/dx;
         grady = 0.5*(
-            (del[i][jp] - del[i][jm])/(2.*dy) +
-            (del[im][jp] - del[im][jm])/(2.*dy) 
+            (_del[i][jp] - _del[i][jm])/(2.*dy) +
+            (_del[im][jp] - _del[im][jm])/(2.*dy) 
             );
         Fxm = -(
             F_coeff_gradx[i][j][2]*gradx +
@@ -166,10 +166,10 @@ void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_co
 
         /* lower y face */
         gradx = 0.5*(
-            (del[ip][j] - del[im][j])/(2.*dx) +
-            (del[ip][jm] - del[im][jm])/(2.*dx) 
+            (_del[ip][j] - _del[im][j])/(2.*dx) +
+            (_del[ip][jm] - _del[im][jm])/(2.*dx) 
             );
-        grady = (del[i][j] - del[i][jm])/dy;
+        grady = (_del[i][j] - _del[i][jm])/dy;
         Fym = -(
             F_coeff_gradx[i][j][3]*gradx +
             F_coeff_grady[i][j][3]*grady 
@@ -183,14 +183,14 @@ void evolve_diffusion(double del[][N], double F_coeff_gradx[][N][4], double F_co
 }
 
 #pragma omp parallel \
-  shared ( del, ddel, dt ) \
+  shared ( _del, ddel, dt ) \
   private (i, j )
 {
 #pragma omp for
-    /* update del */
+    /* update _del */
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        del[i][j] += dt*ddel[i][j] ;
+        _del[i][j] += dt*ddel[i][j] ;
     }
 
 }
@@ -241,7 +241,7 @@ double lr_to_flux(double d_left, double d_right, double v)
 	return(F);
 }
 
-void evolve_advection(double del[][N], double v[][N][4][2], double dt)
+void evolve_advection(double _del[][N], double v[][N][4][2], double dt)
 {
 
     double ddel[N][N],Fxp,Fyp,Fxm,Fym,deladv;
@@ -254,7 +254,7 @@ void evolve_advection(double del[][N], double v[][N][4][2], double dt)
     double dy = PARAM_FOV/N;
 
 #pragma omp parallel \
-  shared ( del, v, Fx, Fy ) \
+  shared ( _del, v, Fx, Fy ) \
   private (i, j, imm, jmm, im, jm, ip, jp, dell, delr )
 {
 #pragma omp for
@@ -267,10 +267,10 @@ void evolve_advection(double del[][N], double v[][N][4][2], double dt)
         jm = (j+N-1)%N ;
         jmm = (j+N-2)%N ;
 
-        reconstruct_lr(del[imm][j],del[im][j],del[i][j],del[ip][j], &dell, &delr);
+        reconstruct_lr(_del[imm][j],_del[im][j],_del[i][j],_del[ip][j], &dell, &delr);
         Fx[i][j] = lr_to_flux(dell, delr, v[i][j][2][0]);
 
-        reconstruct_lr(del[i][jmm],del[i][jm],del[i][j],del[i][jp], &dell, &delr);
+        reconstruct_lr(_del[i][jmm],_del[i][jm],_del[i][j],_del[i][jp], &dell, &delr);
         Fy[i][j] = lr_to_flux(dell, delr, v[i][j][3][1]);
     }
 
@@ -297,21 +297,21 @@ void evolve_advection(double del[][N], double v[][N][4][2], double dt)
 }
 
 #pragma omp parallel \
-  shared ( del, ddel, dt ) \
+  shared ( _del, ddel, dt ) \
   private (i, j )
 {
 #pragma omp for
-    /* update del */
+    /* update _del */
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        del[i][j] += dt*ddel[i][j] ;
+        _del[i][j] += dt*ddel[i][j] ;
     }
 
 }
 
 }
 
-void evolve_noise(double del[][N], double dt)
+void evolve_noise(double _del[][N], double dt)
 {
     int i,j;
 	double del_noise[N][N];
@@ -319,30 +319,30 @@ void evolve_noise(double del[][N], double dt)
 
     noise_model(del_noise, dt);
 
-    /* update del */
+    /* update _del */
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        del[i][j] += del_noise[i][j];
+        _del[i][j] += del_noise[i][j];
     }
 
 }
 
-void evolve_decay(double del[][N], double T[][N], double dt)
+void evolve_decay(double _del[][N], double T[][N], double dt)
 {
 	int i,j;
     double Tdec;
 
 #pragma omp parallel \
-  shared ( del, dt ) \
+  shared ( _del, dt ) \
   private (i, j, Tdec )
 {
 #pragma omp for
-    /* update del */
+    /* update _del */
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         Tdec = T[i][j] + 2.*dt ;
-        //del[i][j] *= (1. - 0.5*dt/Tdec)/(1. + 0.5*dt/Tdec) ;
-        del[i][j] += -dt*del[i][j]/Tdec;
+        //_del[i][j] *= (1. - 0.5*dt/Tdec)/(1. + 0.5*dt/Tdec) ;
+        _del[i][j] += -dt*_del[i][j]/Tdec;
     }
 }
 

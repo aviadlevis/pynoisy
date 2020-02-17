@@ -35,7 +35,7 @@ CFG 22 Dec 2019
 /* set parameters of model */
 #define PARAM_FOV   1.0     /* field of view */
 #define PARAM_EPS   1.0     /* strength of forcing */
-#define PARAM_AMP   0.05    /* strength of perturbation; image = exp(-AMP*del)*envelope */
+#define PARAM_AMP   0.05    /* strength of perturbation; image = exp(-AMP*_del)*envelope */
 #define PARAM_LAM   0.5     /* ratio of correlation length to local radius */
 #define PARAM_TAU   1.0     /* product of correlation time and local Keplerian frequency */
 #define PARAM_RCH   0.2     /* scaling radius */

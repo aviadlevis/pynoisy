@@ -122,7 +122,7 @@ double phi_func(double x, double y)
 }
 
 
-/* return envelope function; image is exp(-del)*envelope */
+/* return envelope function; image is exp(-_del)*envelope */
 
 double envelope(double x, double y)
 {
