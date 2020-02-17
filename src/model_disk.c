@@ -87,6 +87,7 @@ double W_Keplerian(double x, double y)
     return(W);
 }
 
+
 /* return advection velocity as a function of position */
 
 void advection_velocity(double x, double y, double va[2])
@@ -106,6 +107,23 @@ void advection_velocity(double x, double y, double va[2])
     va[0] = -W*y ;
     va[1] = W*x ;
 }
+
+/* return advection velocity for the whole image */
+
+void advection_velocity_image(double velocity[N][N][2])
+{
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    void advection_velocity(double x, double y, double va[2]);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        advection_velocity(x, y, velocity[i][j]);
+    }
+}
+
 
 /* return angle of principle axes of diffusion tensor
    with respect to local radius vector.
@@ -136,7 +154,7 @@ double envelope(double x, double y)
 }
 
 /* noise model */
-void noise_model(double del_noise[][N], double dt)
+void noise_model(double del_noise[N][N], double dt)
 {
 
     int i,j;

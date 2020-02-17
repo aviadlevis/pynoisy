@@ -27,13 +27,13 @@ int cmain(void)
 {
     static double _del[N][N];
     static double fake_image[N][N];
-    void grid_function_calc(double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4], 
-        double v[][N][4][2], double T[][N], double *Kmax, double *Vmax) ;
-    void evolve_diffusion(double _del[][N], double F_coeff_gradx[][N][4], double F_coeff_grady[][N][4],
+    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], 
+        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax) ;
+    void evolve_diffusion(double _del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
         double dt);
-    void evolve_advection(double _del[][N], double v[][N][4][2], double dt);
-    void evolve_decay(double _del[][N], double T[][N], double dt);
-    void evolve_noise(double _del[][N], double dt);
+    void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
+    void evolve_decay(double _del[N][N], double T[N][N], double dt);
+    void evolve_noise(double _del[N][N], double dt);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -46,8 +46,8 @@ int cmain(void)
 
     int i,j ;
     double Dtl = tf/400.;   /* image file output cadence */
-    void apply_envelope(double _del[][N], double fake_image[][N]);
-    void emit_image(double fake_image[][N], int n);
+    void apply_envelope(double _del[N][N], double fake_image[N][N]);
+    void emit_image(double fake_image[N][N], int n);
     void ij_to_xy(int i, int j, double *x, double *y);
 
     /* calculate some grid functions */
@@ -168,9 +168,22 @@ void ij_to_xy(int i, int j, double *x, double *y)
     *y = (j - N/2)*dy ;
 }
 
+/* return image coordinates */
+void xy_image(double x[N][N], double y[N][N])
+{
+    int i,j;
+    void ij_to_xy(int i, int j, double *x, double *y);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x[i][j],&y[i][j]);
+    }
+
+}
+
 /* transform random field into fake image */
 
-void apply_envelope(double _del[][N], double fake_image[][N])
+void apply_envelope(double _del[N][N], double fake_image[N][N])
 {
 
     int i,j;
