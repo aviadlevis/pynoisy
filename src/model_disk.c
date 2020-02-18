@@ -24,7 +24,7 @@ CFG 22 Dec 2019
 #include "noisy.h"
 
 /* correlation length is proportional to local radius */
-double correlation_length(double x,double y)
+double correlation_length(double x,double y,double PARAM_RCH,double PARAM_LAM)
 {
     double r = sqrt( (x*x + y*y)/(PARAM_RCH*PARAM_RCH) );
 
@@ -33,20 +33,20 @@ double correlation_length(double x,double y)
 }
 
 /* correlation time is proportional to the local Keplerian time */
-double correlation_time(double x,double y)
+double correlation_time(double x,double y, double direction, double PARAM_RCH, double PARAM_TAU)
 {
-    double W_Keplerian(double x, double y);
+    double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
-    double t = 1./W_Keplerian(x,y);
+    double t = 1./W_Keplerian(x,y, direction, PARAM_RCH);
 
     return( PARAM_TAU * fabs(t) );
 }
 
-double diffusion_coefficient(double x,double y)
+double diffusion_coefficient(double x,double y, double PARAM_RCH, double PARAM_LAM, double PARAM_TAU, double direction)
 {
 
-    double l = correlation_length(x, y);
-    double t = correlation_time(x, y);
+    double l = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
+    double t = correlation_time(x, y, direction, PARAM_RCH, PARAM_TAU);
     double K = l*l/t;
 
     return( 2.*K );
@@ -54,12 +54,12 @@ double diffusion_coefficient(double x,double y)
 
 /* return principal axes of diffusion tensor */
 
-void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e2x, double *e2y)
+void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e2x, double *e2y, double opening_angle)
 {
     double phi,s,c;
-    double phi_func(double x, double y);
+    double phi_func(double x, double y, double opening_angle);
 
-    phi = phi_func(x,y);
+    phi = phi_func(x,y, opening_angle);
 
     c = cos(phi);
     s = sin(phi);
@@ -71,12 +71,12 @@ void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e
 }
 
 /* return Keplerian orbital frequency */
-double W_Keplerian(double x, double y)
+double W_Keplerian(double x, double y, double direction, double PARAM_RCH)
 {
 
     /* negative W0 turn clockwise on image */
     /* 2.*M_PI allows W to be expressed in terms of orbital period */
-    double direction = -1. ;
+    /*  double direction = -1. ; */
     double period = 1. ;
     double W0 = direction * 2.*M_PI / period ;
 
@@ -90,12 +90,12 @@ double W_Keplerian(double x, double y)
 
 /* return advection velocity as a function of position */
 
-void advection_velocity(double x, double y, double va[2])
+void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH, double PARAM_FOV)
 {
     double r,W,q,taper,rmax;
-    double W_Keplerian(double , double y);
+    double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
-    W = W_Keplerian(x,y);
+    W = W_Keplerian(x,y, direction, PARAM_RCH);
 
     /* taper velocity with bump function */
     r = sqrt(x*x + y*y);
@@ -110,17 +110,17 @@ void advection_velocity(double x, double y, double va[2])
 
 /* return advection velocity for the whole image */
 
-void advection_velocity_image(double velocity[N][N][2])
+void advection_velocity_image(double velocity[N][N][2], double direction, double PARAM_RCH, double PARAM_FOV)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
-    void advection_velocity(double x, double y, double va[2]);
+    void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV);
+    void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH, double PARAM_FOV);
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        advection_velocity(x, y, velocity[i][j]);
+        ij_to_xy(i,j,&x,&y, PARAM_FOV);
+        advection_velocity(x, y, velocity[i][j], direction, PARAM_RCH, PARAM_FOV);
     }
 }
 
@@ -130,19 +130,17 @@ void advection_velocity_image(double velocity[N][N][2])
 
    this can be used to adjust the opening angle of spirals */
 
-double phi_func(double x, double y)
+double phi_func(double x, double y, double opening_angle)
 {
     double phi0 = atan2(y, x);
-    double opening_angle = 0.3*M_PI;
     double phi = phi0 + opening_angle ;
-
     return(phi);
 }
 
 
 /* return envelope function; image is exp(-_del)*envelope */
 
-double envelope(double x, double y)
+double envelope(double x, double y, double PARAM_RCH)
 {
     double r = sqrt(x*x + y*y)/PARAM_RCH + SMALL;
     double ir = 1./r ;
@@ -154,7 +152,7 @@ double envelope(double x, double y)
 }
 
 /* noise model */
-void noise_model(double del_noise[N][N], double dt)
+void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
 {
 
     int i,j;

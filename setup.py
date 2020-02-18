@@ -1,12 +1,13 @@
-from distutils.core import setup
+import setuptools
+from numpy.distutils.core import setup
 from distutils.extension import Extension
 from Cython.Build import cythonize
 import numpy
 
+
 extensions = [
     Extension(
-        'pynoisy', ['src/noisy.pyx'],
-        #extra_compile_args = ['-Wunknown-pragmas', '-Wreturn-type'],
+        'core', ['src/noisy.pyx'],
         include_dirs=['src/', numpy.get_include()],
         libraries=['gsl', 'blas'],
         library_dirs=['/usr/lib/x86_64-linux-gnu/'],
@@ -16,6 +17,8 @@ extensions = [
 
 setup(
     name='pynoisy',
+    version='1.0',
+    packages = setuptools.find_packages(),
     include_dirs=[numpy.get_include()],
     ext_modules=cythonize(extensions)
 )

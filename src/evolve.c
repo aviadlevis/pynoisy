@@ -30,20 +30,27 @@ void grid_function_calc(
     double v[N][N][4][2],
     double T[N][N],
     double *Kmax,
-    double *Vmax
+    double *Vmax,
+    double opening_angle,
+    double direction,
+    double PARAM_RCH,
+    double PARAM_FOV,
+    double PARAM_LAM,
+    double PARAM_TAU,
+    double PARAM_RAT
     ) {
 
-    void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e2x, double *e2y);
-    void advection_velocity(double x, double y, double va[2]);
-    void ij_to_xy(int i,int j,double *x,double *y);
+    void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e2x, double *e2y, double opening_angle);
+    void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH, double PARAM_FOV);
+    void ij_to_xy(int i,int j,double *x,double *y, double PARAM_FOV);
 
     /* preparatory work: calculate some grid functions */
     int i,j ;
     double x,y,dx,dy;
     double e1x,e1y,e2x,e2y;
     double K1,K2;
-    double diffusion_coefficient(double x, double y);
-    double correlation_time(double x, double y);
+    double diffusion_coefficient(double x, double y, double PARAM_RCH, double PARAM_LAM, double PARAM_TAU, double direction);
+    double correlation_time(double x, double y, double direction, double PARAM_RCH, double PARAM_TAU);
 
     dx = PARAM_FOV/N;
     dy = PARAM_FOV/N;
@@ -52,41 +59,41 @@ void grid_function_calc(
     for(i=0;i<N;i++) 
     for(j=0;j<N;j++) {
 
-        ij_to_xy(i,j,&x,&y);
+        ij_to_xy(i,j,&x,&y, PARAM_FOV);
 
-        principal_axis_func(x+0.5*dx, y, &e1x,&e1y,&e2x,&e2y);
-        K1 = diffusion_coefficient(x+0.5*dx, y);
+        principal_axis_func(x+0.5*dx, y, &e1x,&e1y,&e2x,&e2y, opening_angle);
+        K1 = diffusion_coefficient(x+0.5*dx, y, PARAM_RCH, PARAM_LAM, PARAM_TAU, direction);
         K2 = PARAM_RAT*K1;
         F_coeff_gradx[i][j][0] = K1*e1x*e1x + K2*e2x*e2x ;
         F_coeff_grady[i][j][0] = K1*e1x*e1y + K2*e2x*e2y ;
 
-        advection_velocity(x+0.5*dx, y, v[i][j][0]);
+        advection_velocity(x+0.5*dx, y, v[i][j][0], direction, PARAM_RCH, PARAM_FOV);
         
-        principal_axis_func(x, y+0.5*dy, &e1x,&e1y,&e2x,&e2y);
-        K1 = diffusion_coefficient(x, y+0.5*dy);
+        principal_axis_func(x, y+0.5*dy, &e1x,&e1y,&e2x,&e2y, opening_angle);
+        K1 = diffusion_coefficient(x, y+0.5*dy, PARAM_RCH, PARAM_LAM, PARAM_TAU, direction);
         K2 = PARAM_RAT*K1;
         F_coeff_gradx[i][j][1] = K1*e1y*e1x + K2*e2y*e2x ;
         F_coeff_grady[i][j][1] = K1*e1y*e1y + K2*e2y*e2y ;
 
-        advection_velocity(x, y+0.5*dy, v[i][j][1]);
+        advection_velocity(x, y+0.5*dy, v[i][j][1], direction, PARAM_RCH, PARAM_FOV);
 
-        principal_axis_func(x-0.5*dx, y, &e1x,&e1y,&e2x,&e2y);
-        K1 = diffusion_coefficient(x-0.5*dx, y);
+        principal_axis_func(x-0.5*dx, y, &e1x,&e1y,&e2x,&e2y, opening_angle);
+        K1 = diffusion_coefficient(x-0.5*dx, y, PARAM_RCH, PARAM_LAM, PARAM_TAU, direction);
         K2 = PARAM_RAT*K1;
         F_coeff_gradx[i][j][2] = K1*e1x*e1x + K2*e2x*e2x ;
         F_coeff_grady[i][j][2] = K1*e1x*e1y + K2*e2x*e2y ;
 
-        advection_velocity(x-0.5*dx, y, v[i][j][2]);
+        advection_velocity(x-0.5*dx, y, v[i][j][2], direction, PARAM_RCH, PARAM_FOV);
 
-        principal_axis_func(x, y-0.5*dy, &e1x,&e1y,&e2x,&e2y);
-        K1 = diffusion_coefficient(x, y-0.5*dy);
+        principal_axis_func(x, y-0.5*dy, &e1x,&e1y,&e2x,&e2y, opening_angle);
+        K1 = diffusion_coefficient(x, y-0.5*dy, PARAM_RCH, PARAM_LAM, PARAM_TAU, direction);
         K2 = PARAM_RAT*K1;
         F_coeff_gradx[i][j][3] = K1*e1y*e1x + K2*e2y*e2x ;
         F_coeff_grady[i][j][3] = K1*e1y*e1y + K2*e2y*e2y ;
 
-        advection_velocity(x, y-0.5*dy, v[i][j][3]);
+        advection_velocity(x, y-0.5*dy, v[i][j][3], direction, PARAM_RCH, PARAM_FOV);
 
-        T[i][j] = correlation_time(x, y) + SMALL;
+        T[i][j] = correlation_time(x, y, direction, PARAM_RCH, PARAM_TAU) + SMALL;
 
         /* for timestep */
         double Ktot = K1+K2;
@@ -106,7 +113,7 @@ void grid_function_calc(
 }
 
 void evolve_diffusion(double del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
-    double dt)
+    double dt, double PARAM_FOV)
 {
 
     double ddel[N][N];
@@ -242,7 +249,7 @@ double lr_to_flux(double d_left, double d_right, double v)
 	return(F);
 }
 
-void evolve_advection(double del[N][N], double v[N][N][4][2], double dt)
+void evolve_advection(double del[N][N], double v[N][N][4][2], double dt, double PARAM_FOV)
 {
 
     double ddel[N][N],Fxp,Fyp,Fxm,Fym,deladv;
@@ -312,13 +319,13 @@ void evolve_advection(double del[N][N], double v[N][N][4][2], double dt)
 
 }
 
-void evolve_noise(double del[N][N], double dt)
+void evolve_noise(double del[N][N], double dt, double PARAM_EPS)
 {
     int i,j;
 	double del_noise[N][N];
-    void noise_model(double del_noise[N][N], double dt);
+    void noise_model(double del_noise[N][N], double dt, double PARAM_EPS);
 
-    noise_model(del_noise, dt);
+    noise_model(del_noise, dt, PARAM_EPS);
 
     /* update del */
     for(i=0;i<N;i++)
