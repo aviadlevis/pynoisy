@@ -19,11 +19,11 @@ cdef extern from "evolve.c":
     void evolve_decay(double dell[N][N], double T[N][N], double dt)
 
 cdef extern from "model_disk.c":
-    double correlation_length(double x,double y, PARAM_RCH, PARAM_LAM)
-    double correlation_time(double x,double y, direction, PARAM_TAU, PARAM_RCH)
-    void get_correlation_time_image(double correlation_time_image[N][N], double direction, double PARAM_TAU, double PARAM_RCH)
-    double diffusion_coefficient(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
-    void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double direction, double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
+    double correlation_length(double x,double y, double PARAM_RCH, double PARAM_LAM)
+    double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH)
+    void get_correlation_time_image(double correlation_time_image[N][N], double PARAM_TAU, double PARAM_RCH)
+    double diffusion_coefficient(double x,double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
+    void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
     void principal_axis_func(double x, double y, double *e1x, double *e1y, double *e2x, double *e2y, double opening_angle)
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH)
     void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH)
@@ -74,16 +74,16 @@ def get_disk_angle(opening_angle):
     principal_angle_image(angle, opening_angle)
     return np.asarray(angle)
 
-def get_disk_correlation_time(direction, PARAM_TAU, PARAM_RCH):
+def get_disk_correlation_time(PARAM_TAU, PARAM_RCH):
     """TODO"""
     cdef double correlation_time_image[N][N]
-    get_correlation_time_image(correlation_time_image, direction, PARAM_TAU, PARAM_RCH)
+    get_correlation_time_image(correlation_time_image, PARAM_TAU, PARAM_RCH)
     return np.asarray(correlation_time_image)
 
-def get_disk_diffusion_coefficient(direction, PARAM_TAU, PARAM_LAM, PARAM_RCH):
+def get_disk_diffusion_coefficient(PARAM_TAU, PARAM_LAM, PARAM_RCH):
     """TODO"""
     cdef double diffusion_coefficient_image[N][N]
-    get_diffusion_coefficient(diffusion_coefficient_image, direction, PARAM_TAU, PARAM_LAM, PARAM_RCH)
+    get_diffusion_coefficient(diffusion_coefficient_image, PARAM_TAU, PARAM_LAM, PARAM_RCH)
     return np.asarray(diffusion_coefficient_image)
 
 def get_disk_velocity(direction, PARAM_RCH):

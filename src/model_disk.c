@@ -33,50 +33,50 @@ double correlation_length(double x,double y,double PARAM_RCH,double PARAM_LAM)
 }
 
 /* correlation time is proportional to the local Keplerian time */
-double correlation_time(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH)
+double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH)
 {
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
-    double t = 1./W_Keplerian(x,y, direction, PARAM_RCH);
+    double t = 1./W_Keplerian(x,y, -1.0, PARAM_RCH);
 
     return( PARAM_TAU * fabs(t) );
 }
 
-void get_correlation_time_image(double correlation_time_image[N][N], double direction, double PARAM_TAU, double PARAM_RCH)
+void get_correlation_time_image(double correlation_time_image[N][N], double PARAM_TAU, double PARAM_RCH)
 {
     int i,j;
     double x,y;
     void ij_to_xy(int i, int j, double *x, double *y);
-    double correlation_time(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH);
+    double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH);
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         ij_to_xy(i,j,&x,&y);
-        correlation_time_image[i][j] = correlation_time(x, y, direction, PARAM_TAU, PARAM_RCH);
+        correlation_time_image[i][j] = correlation_time(x, y, PARAM_TAU, PARAM_RCH);
     }
 }
 
 
-double diffusion_coefficient(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
+double diffusion_coefficient(double x,double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
 {
     double l = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
-    double t = correlation_time(x, y, direction, PARAM_TAU, PARAM_RCH);
+    double t = correlation_time(x, y, PARAM_TAU, PARAM_RCH);
     double K = l*l/t;
 
     return( 2.*K );
 }
 
-void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double direction, double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
+void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
 {
     int i,j;
     double x,y;
     void ij_to_xy(int i, int j, double *x, double *y);
-    double diffusion_coefficient(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM);
+    double diffusion_coefficient(double x, double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM);
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         ij_to_xy(i,j,&x,&y);
-        diffusion_coefficient_image[i][j] = diffusion_coefficient(x, y, direction, PARAM_TAU, PARAM_RCH, PARAM_LAM);
+        diffusion_coefficient_image[i][j] = diffusion_coefficient(x, y, PARAM_TAU, PARAM_RCH, PARAM_LAM);
     }
 }
 
@@ -104,7 +104,6 @@ double W_Keplerian(double x, double y, double direction, double PARAM_RCH)
 
     /* negative W0 turn clockwise on image */
     /* 2.*M_PI allows W to be expressed in terms of orbital period */
-    /*  double direction = -1. ; */
     double period = 1. ;
     double W0 = direction * 2.*M_PI / period ;
 

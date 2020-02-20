@@ -10,8 +10,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class RotationDirection(Enum):
-    clockwise = -1
-    counter_clockwise = 1
+    clockwise = -1.0
+    counter_clockwise = 1.0
 
 
 class Image(object):
@@ -147,10 +147,8 @@ class DiskDiffusion(Diffusion):
 
     Parameters
     ----------
-    direction: RotationDirection, default=clockwise
-        clockwise or counter clockwise
     opening_angle: float, default= pi/3
-        This angle efines the opening angle of spirals with respect to the vertical axis
+        This angle defines the opening angle of spirals with respect to the local radius
     tau: float, default=1.0
         product of correlation time and local Keplerian frequency
     lam: float, default=0.5
@@ -161,7 +159,6 @@ class DiskDiffusion(Diffusion):
         ratio for the diffusion tensor along the two principal axis.
     """
     def __init__(self,
-                 direction=RotationDirection.clockwise,
                  opening_angle=np.pi/3.0,
                  tau=1.0,
                  lam=0.5,
@@ -169,8 +166,8 @@ class DiskDiffusion(Diffusion):
                  tensor_ratio=0.1):
         super().__init__()
         self._principle_angle = core.get_disk_angle(opening_angle)
-        self._correlation_time = core.get_disk_correlation_time(direction.value, tau, scaling_radius)
-        self._diffusion_coefficient = core.get_disk_diffusion_coefficient(direction.value, tau, lam, scaling_radius)
+        self._correlation_time = core.get_disk_correlation_time(tau, scaling_radius)
+        self._diffusion_coefficient = core.get_disk_diffusion_coefficient(tau, lam, scaling_radius)
         self._tensor_ratio = tensor_ratio
         self._x, self._y = core.get_xy_grid()
 
@@ -205,6 +202,7 @@ class Envelope(Image):
     @property
     def amplitude(self):
         return self._amplitude
+
 
 class DiskEnvelope(Envelope):
     """
