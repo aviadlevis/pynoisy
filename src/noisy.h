@@ -27,8 +27,9 @@ CFG 22 Dec 2019
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_randist.h>
 
-/* size of image.  notice that solution time scales as N^4 */
-#define N  256
+
+#define N  256              /* size of image.  notice that solution time scales as N^4 */
 #define SMALL   1.e-10
+#define PARAM_FOV   1.0     /* field of view */
 
 

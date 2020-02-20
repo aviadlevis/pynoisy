@@ -24,31 +24,31 @@ CFG 22 Dec 2019
 #include "noisy.h"
 
 int cmain(
-    double opening_angle,
-    double direction,
-    double PARAM_RCH,
-    double PARAM_FOV,
-    double PARAM_LAM,
-    double PARAM_TAU,
     double PARAM_RAT,
     double PARAM_AMP,
-    double PARAM_EPS
+    double PARAM_EPS,
+    double tf,
+    double* principal_angle_image,
+    double* advection_velocity_image,
+    double* diffusion_coefficient_image,
+    double* correlation_time_image,
+    double* envelope_image
     )
 {
     static double _del[N][N];
     static double fake_image[N][N];
-    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], 
-        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,  double opening_angle, double direction, double PARAM_RCH, double PARAM_FOV, double PARAM_LAM, double PARAM_TAU, double PARAM_RAT);
+    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
+        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
+        double PARAM_RAT, double* principal_angle_image, double* advection_velocity_image,
+        double* diffusion_coefficient_image, double* correlation_time_image);
     void evolve_diffusion(double _del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
-        double dt, double PARAM_FOV);
-    void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt, double PARAM_FOV);
+        double dt);
+    void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
     void evolve_decay(double _del[N][N], double T[N][N], double dt);
     void evolve_noise(double _del[N][N], double dt, double PARAM_EPS);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
-
-    double tf = 0.1;   /* length of evolution */
 
     /* correlation length l = sqrt(K*T) */
     /* correlation time is t = T */
@@ -56,9 +56,8 @@ int cmain(
 
     int i,j ;
     double Dtl = tf/400.;   /* image file output cadence */
-    void apply_envelope(double _del[N][N], double fake_image[N][N], double PARAM_RCH, double PARAM_AMP, double PARAM_FOV);
+    void apply_envelope(double _del[N][N], double fake_image[N][N], double* envelope_image, double PARAM_AMP);
     void emit_image(double fake_image[N][N], int n);
-    void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV);
 
     /* calculate some grid functions */
     static double v[N][N][4][2];
@@ -67,15 +66,19 @@ int cmain(
     static double T[N][N];
     double F_coeff_gradx[N][N][4] = {{{0.}}};
     double F_coeff_grady[N][N][4] = {{{0.}}};
-    grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax, opening_angle, direction, PARAM_RCH, PARAM_FOV, PARAM_LAM, PARAM_TAU, PARAM_RAT);
+
+
+    grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
+        PARAM_RAT, principal_angle_image, advection_velocity_image,
+        diffusion_coefficient_image, correlation_time_image);
     fprintf(stderr,"Vmax: %g\n",Vmax);
 
     /* now that we know Kmax and Vmax, set timestep */
     double d = fmin(dx,dy);
-        /* courant-limited timestep for diffusive part.  cour = 1 is
-           the rigorous stability limit if dx = dy, RAT = 1 */
+    /* courant-limited timestep for diffusive part.  cour = 1 is
+       the rigorous stability limit if dx = dy, RAT = 1 */
     double cour = 0.45;
-    double dtdiff = cour*0.25*d*d/Kmax;   
+    double dtdiff = cour*0.25*d*d/Kmax;
     double dtadv = cour*0.5*d/Vmax;
     double dt = fmin(dtdiff, dtadv);
     fprintf(stderr,"dt,dtdiff,dtadv: %g %g %g\n",dt, dtdiff, dtadv);
@@ -88,7 +91,7 @@ int cmain(
     gsl_rng * r;
     r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
     gsl_rng_set(r, 0);
-    for(i=0;i<N;i++) 
+    for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         /*
         ij_to_xy(i,j,&x,&y);
@@ -99,7 +102,7 @@ int cmain(
     }
     /*
     double delavg;
-    for(i=0;i<N;i++) 
+    for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         ip = (i+N+1)%N ;
         im = (i+N-1)%N ;
@@ -108,8 +111,8 @@ int cmain(
         delavg = 0.25*(_del[ip][j] + _del[i][jp] + _del[im][j] + _del[i][jm]);
         ddel[i][j] = delavg;
     }
-    for(i=0;i<N;i++) 
-    for(j=0;j<N;j++) 
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++)
         _del[i][j] = ddel[i][j];
     */
 
@@ -131,7 +134,7 @@ int cmain(
             rms = sqrt(rms)/N;
 
             /* transform random field into image */
-            apply_envelope(_del, fake_image, PARAM_RCH, PARAM_AMP, PARAM_FOV);
+            apply_envelope(_del, fake_image, envelope_image, PARAM_AMP);
 
             /* get light curve */
             F = 0.;
@@ -149,27 +152,26 @@ int cmain(
 
         /* operator split */
         evolve_noise(_del, dt, PARAM_EPS);
-        evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt, PARAM_FOV);
-        evolve_advection(_del, v, dt, PARAM_FOV);
+        evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
+        evolve_advection(_del, v, dt);
         evolve_decay(_del, T, dt);
-
         nstep++;
         t += dt;
 
     }
-
+    /*
     FILE *fp = fopen("noisy.out", "w");
     if(fp == NULL) exit(1);
     for(i=0;i<N;i++)
-    for(j=0;j<N;j++) 
+    for(j=0;j<N;j++)
         fprintf(fp,"%d %d %lf\n",i,j,_del[i][j]);
-
+    */
 }
 
 
 /* return the coordinates of a zone center */
 
-void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV)
+void ij_to_xy(int i, int j, double *x, double *y)
 {
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -179,32 +181,26 @@ void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV)
 }
 
 /* return image coordinates */
-void xy_image(double x[N][N], double y[N][N], double PARAM_FOV)
+void xy_image(double x[N][N], double y[N][N])
 {
     int i,j;
-    void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV);
+    void ij_to_xy(int i, int j, double *x, double *y);
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x[i][j],&y[i][j], PARAM_FOV);
+        ij_to_xy(i,j,&x[i][j],&y[i][j]);
     }
 
 }
 
 /* transform random field into fake image */
-
-void apply_envelope(double _del[N][N], double fake_image[N][N], double PARAM_RCH, double PARAM_AMP, double PARAM_FOV)
+void apply_envelope(double _del[N][N], double fake_image[N][N], double* envelope_image, double PARAM_AMP)
 {
-
-    int i,j;
-    double x,y;
-    double envelope(double x, double y, double PARAM_RCH);
-    void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV);
-
+    int i,j, k;
     for(i=0;i<N;i++) 
     for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y, PARAM_FOV);
-        fake_image[i][j] = envelope(x,y,PARAM_RCH)*exp(-PARAM_AMP*_del[i][j]);
+        fake_image[i][j] = envelope_image[k]*exp(-PARAM_AMP*_del[i][j]);
+        k++;
     }
 }
 

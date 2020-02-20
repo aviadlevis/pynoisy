@@ -33,7 +33,7 @@ double correlation_length(double x,double y,double PARAM_RCH,double PARAM_LAM)
 }
 
 /* correlation time is proportional to the local Keplerian time */
-double correlation_time(double x,double y, double direction, double PARAM_RCH, double PARAM_TAU)
+double correlation_time(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH)
 {
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
@@ -42,14 +42,42 @@ double correlation_time(double x,double y, double direction, double PARAM_RCH, d
     return( PARAM_TAU * fabs(t) );
 }
 
-double diffusion_coefficient(double x,double y, double PARAM_RCH, double PARAM_LAM, double PARAM_TAU, double direction)
+void get_correlation_time_image(double correlation_time_image[N][N], double direction, double PARAM_TAU, double PARAM_RCH)
 {
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    double correlation_time(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH);
 
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        correlation_time_image[i][j] = correlation_time(x, y, direction, PARAM_TAU, PARAM_RCH);
+    }
+}
+
+
+double diffusion_coefficient(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
+{
     double l = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
-    double t = correlation_time(x, y, direction, PARAM_RCH, PARAM_TAU);
+    double t = correlation_time(x, y, direction, PARAM_TAU, PARAM_RCH);
     double K = l*l/t;
 
     return( 2.*K );
+}
+
+void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double direction, double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
+{
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    double diffusion_coefficient(double x,double y, double direction, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        diffusion_coefficient_image[i][j] = diffusion_coefficient(x, y, direction, PARAM_TAU, PARAM_RCH, PARAM_LAM);
+    }
 }
 
 /* return principal axes of diffusion tensor */
@@ -90,9 +118,10 @@ double W_Keplerian(double x, double y, double direction, double PARAM_RCH)
 
 /* return advection velocity as a function of position */
 
-void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH, double PARAM_FOV)
+void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH)
 {
     double r,W,q,taper,rmax;
+    double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
     W = W_Keplerian(x,y, direction, PARAM_RCH);
@@ -109,21 +138,19 @@ void advection_velocity(double x, double y, double va[2], double direction, doub
 }
 
 /* return advection velocity for the whole image */
-
-void advection_velocity_image(double velocity[N][N][2], double direction, double PARAM_RCH, double PARAM_FOV)
+void get_advection_velocity_image(double velocity[N][N][2], double direction, double PARAM_RCH)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y, double PARAM_FOV);
-    void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH, double PARAM_FOV);
+    void ij_to_xy(int i, int j, double *x, double *y);
+    void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH);
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y, PARAM_FOV);
-        advection_velocity(x, y, velocity[i][j], direction, PARAM_RCH, PARAM_FOV);
+        ij_to_xy(i,j,&x,&y);
+        advection_velocity(x, y, velocity[i][j], direction, PARAM_RCH);
     }
 }
-
 
 /* return angle of principle axes of diffusion tensor
    with respect to local radius vector.
@@ -135,6 +162,21 @@ double phi_func(double x, double y, double opening_angle)
     double phi0 = atan2(y, x);
     double phi = phi0 + opening_angle ;
     return(phi);
+}
+
+/* return diffusion tensor principal angle for the whole image */
+void principal_angle_image(double angle[N][N], double opening_angle)
+{
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    double phi_func(double x, double y, double opening_angle);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        angle[i][j] = phi_func(x, y, opening_angle);
+    }
 }
 
 
@@ -149,6 +191,21 @@ double envelope(double x, double y, double PARAM_RCH)
     double f2 = pow(ir, 4.) ;     /* outer power-law envelope */
 
     return(f1*f2);
+}
+
+/* return image envelope */
+void get_envelope_image(double envelope_image[N][N], double PARAM_RCH)
+{
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    double envelope(double x, double y, double PARAM_RCH);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        envelope_image[i][j] = envelope(x, y, PARAM_RCH);
+    }
 }
 
 /* noise model */
