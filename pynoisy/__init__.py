@@ -243,7 +243,7 @@ class PDESolver(object):
 
     def run(self, evolution_length=0.1):
         """TODO"""
-        core.run_main(
+        return core.run_main(
             self.diffusion.tensor_ratio,
             self.envelope.amplitude,
             self.forcing_strength,

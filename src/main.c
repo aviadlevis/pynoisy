@@ -32,11 +32,13 @@ int cmain(
     double* advection_velocity_image,
     double* diffusion_coefficient_image,
     double* correlation_time_image,
-    double* envelope_image
+    double* envelope_image,
+    double* output_video
     )
 {
     static double _del[N][N];
     static double fake_image[N][N];
+
     void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
         double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
         double PARAM_RAT, double* principal_angle_image, double* advection_velocity_image,
@@ -55,9 +57,8 @@ int cmain(
     /* so diffusion coefficient is l^2/t */
 
     int i,j ;
-    double Dtl = tf/400.;   /* image file output cadence */
+    double Dtl = tf / (double) NUM_IMAGES;   /* image file output cadence */
     void apply_envelope(double _del[N][N], double fake_image[N][N], double* envelope_image, double PARAM_AMP);
-    void emit_image(double fake_image[N][N], int n);
 
     /* calculate some grid functions */
     static double v[N][N][4][2];
@@ -139,15 +140,16 @@ int cmain(
             /* get light curve */
             F = 0.;
             for(i=0;i<N;i++)
-            for(j=0;j<N;j++) F += fake_image[i][j]*dx*dy;
-            fprintf(stderr,"%lf %lf %lf\n",t, F, rms);
+            for(j=0;j<N;j++) {
+                F += fake_image[i][j]*dx*dy;
+                output_video[n] = fake_image[i][j];
+                n++;
+            }
 
-            /* output image */
-            emit_image(fake_image, n);
+            fprintf(stderr,"%lf %lf %lf\n",t, F, rms);
 
             /* set time for next diagnostic output */
             tl += Dtl;
-            n++;
         }
 
         /* operator split */
