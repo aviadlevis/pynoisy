@@ -26,7 +26,7 @@ CFG 22 Dec 2019
 #include <math.h>
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_randist.h>
-
+#include <stdbool.h>
 
 #define N  256              /* size of image.  notice that solution time scales as N^4 */
 #define NUM_IMAGES  100     /* number of output images for a given video */

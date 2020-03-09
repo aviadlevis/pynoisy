@@ -32,6 +32,20 @@ double correlation_length(double x,double y,double PARAM_RCH,double PARAM_LAM)
 
 }
 
+void get_correlation_length_image(double correlation_length_image[N][N], double PARAM_RCH, double PARAM_LAM)
+{
+    int i,j;
+    double x,y;
+    void ij_to_xy(int i, int j, double *x, double *y);
+    double correlation_length(double x,double y, double PARAM_RCH, double PARAM_LAM);
+
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        ij_to_xy(i,j,&x,&y);
+        correlation_length_image[i][j] = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
+    }
+}
+
 /* correlation time is proportional to the local Keplerian time */
 double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH)
 {

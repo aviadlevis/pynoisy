@@ -33,7 +33,8 @@ int cmain(
     double* diffusion_coefficient_image,
     double* correlation_time_image,
     double* envelope_image,
-    double* output_video
+    double* output_video,
+    bool verbose
     )
 {
     static double _del[N][N];
@@ -72,7 +73,10 @@ int cmain(
     grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
         PARAM_RAT, principal_angle_image, advection_velocity_image,
         diffusion_coefficient_image, correlation_time_image);
-    fprintf(stderr,"Vmax: %g\n",Vmax);
+
+    if (verbose) {
+        fprintf(stderr,"Vmax: %g\n",Vmax);
+    }
 
     /* now that we know Kmax and Vmax, set timestep */
     double d = fmin(dx,dy);
@@ -82,7 +86,9 @@ int cmain(
     double dtdiff = cour*0.25*d*d/Kmax;
     double dtadv = cour*0.5*d/Vmax;
     double dt = fmin(dtdiff, dtadv);
-    fprintf(stderr,"dt,dtdiff,dtadv: %g %g %g\n",dt, dtdiff, dtadv);
+    if (verbose) {
+        fprintf(stderr,"dt,dtdiff,dtadv: %g %g %g\n",dt, dtdiff, dtadv);
+    }
 
     /* initial conditions (typically zero) */
     /*
@@ -145,9 +151,9 @@ int cmain(
                 output_video[n] = fake_image[i][j];
                 n++;
             }
-
-            fprintf(stderr,"%lf %lf %lf\n",t, F, rms);
-
+            if (verbose) {
+                fprintf(stderr,"%lf %lf %lf\n",t, F, rms);
+            }
             /* set time for next diagnostic output */
             tl += Dtl;
         }

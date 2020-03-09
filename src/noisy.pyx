@@ -1,10 +1,12 @@
 cimport numpy as np
 import numpy as np
 from cpython cimport array
+from libcpp cimport bool
 
 cdef extern from "noisy.h":
     enum: N
     enum: NUM_IMAGES
+
 
 cdef extern from "evolve.c":
     void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], double v[N][N][4][2],
@@ -22,6 +24,7 @@ cdef extern from "evolve.c":
 cdef extern from "model_disk.c":
     double correlation_length(double x,double y, double PARAM_RCH, double PARAM_LAM)
     double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH)
+    void get_correlation_length_image(double correlation_length_image[N][N], double PARAM_RCH, double PARAM_LAM)
     void get_correlation_time_image(double correlation_time_image[N][N], double PARAM_TAU, double PARAM_RCH)
     double diffusion_coefficient(double x,double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
     void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
@@ -39,7 +42,7 @@ cdef extern from "main.c":
     int cmain(double PARAM_RAT, double PARAM_AMP, double PARAM_EPS, double tf,
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image, double* envelope_image,
-              double* output_video)
+              double* output_video, bool verbose)
     void xy_image(double x[N][N], double y[N][N])
 
 cdef extern from "image.c":
@@ -57,12 +60,13 @@ def run_main(PARAM_RAT, PARAM_AMP, PARAM_EPS, evolution_length,
              np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
              np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
              np.ndarray[double, ndim=2, mode="c"] c_correlation_time_image,
-             np.ndarray[double, ndim=2, mode="c"] c_envelope_image):
+             np.ndarray[double, ndim=2, mode="c"] c_envelope_image,
+             verbose):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
     cmain(PARAM_RAT, PARAM_AMP, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
-          &c_envelope_image[0,0], &output_video[0,0,0])
+          &c_envelope_image[0,0], &output_video[0,0,0], verbose)
     return np.asarray(output_video)
 
 
@@ -78,6 +82,12 @@ def get_disk_angle(opening_angle):
     cdef double angle[N][N]
     principal_angle_image(angle, opening_angle)
     return np.asarray(angle)
+
+def get_disk_correlation_length(PARAM_RCH, PARAM_LAM):
+    """TODO"""
+    cdef double correlation_length_image[N][N]
+    get_correlation_length_image(correlation_length_image, PARAM_RCH, PARAM_LAM)
+    return np.asarray(correlation_length_image)
 
 def get_disk_correlation_time(PARAM_TAU, PARAM_RCH):
     """TODO"""
