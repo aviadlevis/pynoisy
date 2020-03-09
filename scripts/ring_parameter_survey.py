@@ -40,10 +40,11 @@ def main(envelope_params, evolution_params, obs_sgra, args):
     # Save Noisy and ehtim Movie objects
     output_folder = os.path.join(args.eht_home, args.output_folder, time.strftime("%d-%b-%Y-%H:%M:%S"))
 
+    round_digits = lambda x: round(x, 3) if isinstance(x, float) else x
     output_path = os.path.join(
         output_folder,
-        'envelope' + ''.join(['_{}{}'.format(key, value) for key, value in envelope_params.items()]) +
-        '_evolution' + ''.join(['_{}{}'.format(key, value) for key, value in evolution_params.items()])
+        'envelope' + ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in envelope_params.items()]) +
+        '_evolution' + ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in evolution_params.items()])
     )
     noisy_movie.save(output_path + '.pkl')
     ehtim_movie.save_hdf5(output_path + '.hdf5')
