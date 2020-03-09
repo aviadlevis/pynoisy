@@ -50,7 +50,7 @@ def main(envelope_params, evolution_params, obs_sgra, args):
     ehtim_movie.save_hdf5(output_path + '.hdf5')
 
     # Export arguments as json
-    with open('args.txt', 'w') as file:
+    with open(os.path.join(output_folder, 'args.txt'), 'w') as file:
         json.dump(args.__dict__, file, indent=2)
 
     # Save an mp4 for display
@@ -65,7 +65,7 @@ def parse_arguments():
                         default='SgrA/data/calibrated_data_oct2019/frankenstein_3599_lo_SGRA_polcal_netcal_LMTcal_10s.uvfits',
                         help='(default value: eht_home/%(default)s) Path to sgr uvfits file. Relative within the eht home directory.')
     parser.add_argument('--output_folder',
-                        default='SgrA/data/synthetic_rings/',
+                        default='SgrA/synthetic_rings/',
                         help='Path to a json input argument file.')
     parser.add_argument('--args_path',
                         help='Path to a json input argument file.')
@@ -80,37 +80,30 @@ def parse_arguments():
     envelope = parser.add_argument_group('Envelope parameters')
     envelope.add_argument('--flux',
                         nargs='+',
-                        type=np.float32,
                         default=[2.23],
                         help='(default value: %(default)s) Normalize the average flux of the movie.')
     envelope.add_argument('--fov',
                         nargs='+',
-                        type=np.float32,
                         default=[95.0],
                         help='(default value: %(default)s) Field of view of the image micro-arcsecs.')
     envelope.add_argument('--inner_radius',
                         nargs='+',
-                        type=np.float32,
                         default=[0.2],
                         help='(default value: %(default)s) Inner ring radius (unitless).')
     envelope.add_argument('--bright_ring_thickness',
                         nargs='+',
-                        type=np.float32,
                         default=[0.05],
                         help='(default value: %(default)s) Thickness of the bright ring (unitless).')
     envelope.add_argument('--bright_ring_decay',
                         nargs='+',
-                        type=np.float32,
                         default=[100],
                         help='(default value: %(default)s) Decay constant of the bright ring exponential.')
     envelope.add_argument('--inner_decay',
                         nargs='+',
-                        type=np.float32,
                         default=[5.0],
                         help='(default value: %(default)s) Decay constant of the exponential.')
     envelope.add_argument('--ascent',
                         nargs='+',
-                        type=np.float32,
                         default=[1.0],
                         help='(default value: %(default)s) Ascent of the inner (dark) region.')
 
@@ -118,7 +111,6 @@ def parse_arguments():
     evolution = parser.add_argument_group('Evolution parameters')
     evolution.add_argument('--angle',
                         nargs='+',
-                        type=np.float32,
                         default=[np.pi/3.0],
                         help='(default value: %(default)s) Opening angle of the diffusion tensor '
                              'with respect to local radius.')
@@ -129,17 +121,14 @@ def parse_arguments():
                         help='(default value: %(default)s) Rotation directions. cw: clockwise. ccw: counter clockwise.')
     evolution.add_argument('--eps',
                         nargs='+',
-                        type=np.float32,
                         default=[0.1],
                         help='(default value: %(default)s) Forcing strength.')
     evolution.add_argument('--dur',
                         nargs='+',
-                        type=np.float32,
                         default=[0.1],
                         help='(default value: %(default)s) Evolution duration.')
     evolution.add_argument('--amp',
                         nargs='+',
-                        type=np.float32,
                         default=[0.2],
                         help='(default value: %(default)s) Noisy amplitude '
                              'output_image = envelope * exp(amp * noisy_image).')
