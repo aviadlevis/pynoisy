@@ -285,9 +285,9 @@ class Envelope(Image):
     amplitude: float, default = 0.05
         strength of perturbation; image = exp(-amplitude*del)*envelope
     """
-    def __init__(self, amplitude=0.05):
+    def __init__(self, data=None, amplitude=0.05):
         super().__init__()
-        self._data = np.ones(shape=self.image_shape, dtype=np.float64, order='C')
+        self._data = np.ones(shape=self.image_shape, dtype=np.float64, order='C') if data is None else data
         self._amplitude = amplitude
 
     def __add__(self, other):
@@ -339,26 +339,26 @@ class RingEnvelope(Envelope):
     amplitude: float, default = 0.05
         strength of perturbation; image = exp(-amplitude*del)*envelope
     """
-    def __init__(self, inner_radius=0.2, outer_radius=1.0, bright_ring_thickness=0.05, bright_ring_contrast=0.95,
-                 bright_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, amplitude=0.05):
+    def __init__(self, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
+                 photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, amplitude=0.05):
         super().__init__(amplitude)
 
         zone0_radius = inner_radius
-        zone1_radius = inner_radius + bright_ring_thickness
+        zone1_radius = inner_radius + photon_ring_thickness
 
-        decay1 = bright_ring_decay
+        decay1 = photon_ring_decay
         decay2 = inner_decay
         decay3 = outer_decay
 
         zone0 = np.exp(-1.0 / ((self.r + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
         zone0[self.r > zone0_radius] = 0
 
-        zone1 = (bright_ring_contrast + np.exp(-decay1 * (self.r - zone0_radius))) * np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
+        zone1 = (photon_ring_contrast + np.exp(-decay1 * (self.r - zone0_radius))) * np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
         zone1[self.r <= zone0_radius] = 0
         zone1[self.r > zone1_radius] = 0
 
         zone2 = np.exp(-decay2 * (self.r - zone1_radius)) * np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)  * \
-                (bright_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
+                (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
         zone2[self.r <= zone1_radius] = 0
 
         data = zone0 + zone1 + zone2
@@ -367,7 +367,7 @@ class RingEnvelope(Envelope):
             data[self.r > outer_radius] = 0
             zone3 = np.exp(-decay3 * (self.r - outer_radius)) * np.exp(-decay2 * (outer_radius - zone1_radius)) * \
                     np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)  * \
-                    (bright_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
+                    (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
             zone3[self.r <= outer_radius] = 0
             data += zone3
 
