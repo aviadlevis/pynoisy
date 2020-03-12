@@ -4,10 +4,12 @@ import os, time
 from tqdm import tqdm
 from joblib import Parallel, delayed
 import ehtim.imaging.dynamical_imaging as di
+import ehtim as eh
 import pynoisy.eht_functions as ehtf
 import itertools
 import argparse
 import json
+import glob
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
@@ -23,15 +25,12 @@ def generate_noisy_movie(envelope_params, evolution_params, verbose):
     rotation = pynoisy.RotationDirection.clockwise if evolution_params['rotation'] == 'cw' else \
         pynoisy.RotationDirection.counter_clockwise
 
-    unitless_radius = envelope_params['radius'] / envelope_params['fov']
-    envelope = pynoisy.RingEnvelope(
-        inner_radius=unitless_radius,
-        photon_ring_thickness=envelope_params['photon_ring_thickness'] / envelope_params['fov'],
-        photon_ring_decay=envelope_params['photon_ring_decay'],
-        ascent=envelope_params['ascent'],
-        inner_decay=envelope_params['inner_decay'],
-        amplitude=evolution_params['amp'],
-    )
+    image = eh.image.load_fits(envelope_params['envelope'])
+    image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
+    fov =  image.fovx()
+    unitless_radius = eh.RADPERUAS * evolution_params['radius'] / fov
+
+    envelope = pynoisy.Envelope(data=image.imarr(), amplitude=evolution_params['amp'])
     diffusion = pynoisy.RingDiffusion(
         opening_angle=-np.deg2rad(evolution_params['angle'])*rotation.value,
         tau=evolution_params['tau'],
@@ -42,7 +41,7 @@ def generate_noisy_movie(envelope_params, evolution_params, verbose):
     advection = pynoisy.DiskAdvection(direction=rotation, scaling_radius=unitless_radius)
     solver = pynoisy.PDESolver(advection, diffusion, envelope, forcing_strength=evolution_params['eps'])
     movie = solver.run(evolution_length=evolution_params['dur'], verbose=verbose)
-    return movie
+    return movie, fov
 
 def main(envelope_params, evolution_params, obs_sgra, args, output_folder):
     """The main function to (parallel) run the parameter survey.
@@ -56,15 +55,14 @@ def main(envelope_params, evolution_params, obs_sgra, args, output_folder):
     """
     round_digits = lambda x: round(x, 3) if isinstance(x, float) else x
     output_path = os.path.join(
-        output_folder,
-        'envelope' + ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in envelope_params.items()]) +
-        '_evolution' + ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in evolution_params.items()])
-    )
+        output_folder, envelope_params['envelope'].split('/')[-1][:-5] +
+        ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in evolution_params.items()]))
+
     if os.path.exists(output_path + '.hdf5'):
         return
 
-    noisy_movie = generate_noisy_movie(envelope_params, evolution_params, args.verbose)
-    ehtim_movie = ehtf.ehtim_movie(noisy_movie.frames, obs_sgra, envelope_params['flux'], envelope_params['fov'])
+    noisy_movie, fov = generate_noisy_movie(envelope_params, evolution_params, args.verbose)
+    ehtim_movie = ehtf.ehtim_movie(noisy_movie.frames, obs_sgra, normalize_flux=False, fov=fov)
 
     # Save Noisy and ehtim Movie objects
     ehtim_movie.save_hdf5(output_path + '.hdf5')
@@ -75,7 +73,7 @@ def main(envelope_params, evolution_params, obs_sgra, args, output_folder):
 
     # Save mp4 for display
     if args.mp4:
-        di.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '.mp4')
+        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '.mp4', verbose=False)
 
 def parse_arguments():
     """Parse the command-line arguments for each run.
@@ -93,8 +91,8 @@ def parse_arguments():
                         default='SgrA/data/calibrated_data_oct2019/frankenstein_3599_lo_SGRA_polcal_netcal_LMTcal_10s.uvfits',
                         help='(default value: eht_home/%(default)s) Path to sgr uvfits file. Relative within the eht home directory.')
     parser.add_argument('--output_folder',
-                        default='SgrA/synthetic_rings/',
-                        help='(default value: eht_home/%(default)s)  Path to output folder. Relative within the eht home directory.')
+                        default='SgrA/synthetic_data_SGRA_3599_lo/representative_models',
+                        help='(default value: eht_home/fits_path/%(default)s) Path to output folder. Relative within the fits_path directory.')
     parser.add_argument('--args_path',
                         help='Path to a json input argument file.')
     parser.add_argument('--n_jobs',
@@ -116,41 +114,10 @@ def parse_arguments():
 
     # Envelope parameters
     envelope = parser.add_argument_group('Envelope parameters')
-    envelope.add_argument('--flux',
-                        nargs='+',
-                        type=float,
-                        default=[2.23],
-                        help='(default value: %(default)s) Normalize the average flux of the movie.')
-    envelope.add_argument('--fov',
-                        nargs='+',
-                        type=float,
-                        default=[125.0],
-                        help='(default value: %(default)s) Field of view of the image  (micro arcsecs).')
-    envelope.add_argument('--radius',
-                        nargs='+',
-                        type=float,
-                        default=[21.875],
-                        help='(default value: %(default)s) Inner ring radius  (micro arcsecs).')
-    envelope.add_argument('--photon_ring_thickness',
-                        nargs='+',
-                        type=float,
-                        default=[6.25],
-                        help='(default value: %(default)s) Thickness of the bright ring (micro arcsecs).')
-    envelope.add_argument('--photon_ring_decay',
-                        nargs='+',
-                        type=float,
-                        default=[100],
-                        help='(default value: %(default)s) Decay constant of the bright ring exponential.')
-    envelope.add_argument('--inner_decay',
-                        nargs='+',
-                        type=float,
-                        default=[5.0],
-                        help='(default value: %(default)s) Decay constant of the exponential.')
-    envelope.add_argument('--ascent',
-                        nargs='+',
-                        type=float,
-                        default=[1.0],
-                        help='(default value: %(default)s) Ascent of the inner (dark) region.')
+    envelope.add_argument('--fits_path',
+                          nargs='+',
+                          default=['SgrA/synthetic_data_SGRA_3599_lo/representative_models'],
+                          help='(default value: eht_home/%(default)s) Paths to envelope fits files. Relative within the eht home directory.')
 
     # Evolution parameters
     evolution = parser.add_argument_group('Evolution parameters')
@@ -160,6 +127,11 @@ def parse_arguments():
                         default=[60.0],
                         help='(default value: %(default)s) Opening angle of the diffusion tensor '
                              'with respect to local radius.')
+    evolution.add_argument('--radius',
+                        nargs='+',
+                        type=float,
+                        default=[19.0],
+                        help='(default value: %(default)s) Scaling radius for the diffusion/advection fields.')
     evolution.add_argument('--rotation',
                         nargs='+',
                         choices=['cw', 'ccw'],
@@ -211,7 +183,12 @@ def split_arguments(parser, args):
     for group in parser._action_groups:
         group_dict = {a.dest: getattr(args, a.dest, None) for a in group._group_actions}
         arg_groups[group.title] = argparse.Namespace(**group_dict)
+
     envelope_args = arg_groups['Envelope parameters'].__dict__
+    envelope_args['envelope'] = []
+    for path in envelope_args['fits_path']:
+        envelope_args['envelope'].extend(glob.glob(os.path.join(args.eht_home, path) + '/*.fits'))
+
     evolution_args = arg_groups['Evolution parameters'].__dict__
     return envelope_args, evolution_args
 
@@ -224,7 +201,7 @@ def load_save_parameters(parser, args):
     """
     if args.resume_run is not None:
         output_folder = os.path.join(args.eht_home, args.resume_run)
-        args.args_path = os.path.join(output_folder, 'ring_args.txt')
+        args.args_path = os.path.join(output_folder, 'args.txt')
     else:
         output_folder = os.path.join(args.eht_home, args.output_folder, time.strftime("%d-%b-%Y-%H:%M:%S"))
 
@@ -236,7 +213,7 @@ def load_save_parameters(parser, args):
     # Export arguments as json
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    with open(os.path.join(output_folder, 'ring_args.txt'), 'w') as file:
+    with open(os.path.join(output_folder, 'args.txt'), 'w') as file:
         json.dump({**envelope_args, **evolution_args}, file, indent=2)
     return envelope_args, evolution_args, output_folder
 
