@@ -35,7 +35,8 @@ def load_sgra_obs(ehtim_home, uvfits_path):
     return obs_sgra
 
 def ehtim_movie(frames, obs_sgra, total_flux=2.23, normalize_flux=True, fov=125, fov_units='uas',
-                start_time=None, end_time=None, std_threshold=8, median_size=5):
+                start_time=None, end_time=None, std_threshold=8, median_size=5,
+                linpol_mag=0.3, linpol_corr=10.0, circpol_mag=0.1, cirpol_corr=5.0, seed=0):
     """Generate ehtim Movie object.
 
     Args:
@@ -79,6 +80,7 @@ def ehtim_movie(frames, obs_sgra, total_flux=2.23, normalize_flux=True, fov=125,
         im.mjd = mjd
         im.time = time
         im.imvec = flux_normalization * frame.reshape(-1)
+        im = im.add_random_pol(linpol_mag, linpol_corr*eh.RADPERUAS, circpol_mag, cirpol_corr*eh.RADPERUAS, seed=seed)
         movie_frames.append(im)
 
     movie = eh.movie.merge_im_list(movie_frames)
