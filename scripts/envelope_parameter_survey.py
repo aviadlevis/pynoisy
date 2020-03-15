@@ -13,108 +13,6 @@ import glob
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
-def generate_noisy_movie(envelope_params, evolution_params, output_path, verbose):
-    """Generates and saves a noisy movie using the pynoisy library.
-    A pkl file is saved for the noisy movie and an HDF5 for the ehtim movie.
-
-    Args:
-        envelope_params (dict): dictionary with all the enevelope parameters.
-        envelope_params (dict): dictionary with all the evolution parameters.
-        verbose (bool): True for noisy iteration print out.
-    """
-    image = eh.image.load_fits(envelope_params['envelope'])
-    image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
-    fov = image.fovx()
-
-    if os.path.exists(output_path + '.pkl') == False:
-        rotation = pynoisy.RotationDirection.clockwise if evolution_params['rotation'] == 'cw' else \
-            pynoisy.RotationDirection.counter_clockwise
-        unitless_radius = eh.RADPERUAS * evolution_params['radius'] / fov
-        envelope = pynoisy.Envelope(data=image.imarr(), amplitude=evolution_params['amp'])
-        diffusion = pynoisy.RingDiffusion(
-            opening_angle=-np.deg2rad(evolution_params['angle'])*rotation.value,
-            tau=evolution_params['tau'],
-            lam=evolution_params['lam'],
-            scaling_radius=unitless_radius,
-            tensor_ratio=evolution_params['tensor_ratio']
-        )
-        advection = pynoisy.DiskAdvection(direction=rotation, scaling_radius=unitless_radius)
-        solver = pynoisy.PDESolver(advection, diffusion, envelope, forcing_strength=evolution_params['eps'])
-        movie = solver.run(evolution_length=evolution_params['dur'], verbose=verbose)
-    else:
-        movie = pynoisy.Movie()
-        movie.load(output_path + '.pkl')
-    return movie, fov
-
-def main(envelope_params, evolution_params, observation_params, obs_sgra, args, output_folder):
-    """The main function to (parallel) run the parameter survey.
-
-    Args:
-        envelope_params (dict): dictionary with all the enevelope parameters.
-        envelope_params (dict): dictionary with all the evolution parameters.
-        obs_sgra (obs): SgrA observation object.
-        args (Namespace): an argparse Namspace object with all the command line arguments.
-        output_folder (str): the output directory where all results are saved.
-    """
-    round_digits = lambda x: round(x, 3) if isinstance(x, float) else x
-    output_path = os.path.join(
-        output_folder, envelope_params['envelope'].split('/')[-1][:-5] +
-        ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in evolution_params.items()]))
-
-    noisy_movie, fov = generate_noisy_movie(envelope_params, evolution_params, output_path, args.verbose)
-    if args.pkl:
-        noisy_movie.save(output_path + '.pkl')
-
-    if os.path.exists(output_path + '.hdf5') == False:
-        ehtim_movie = ehtf.ehtim_movie(noisy_movie.frames, obs_sgra, normalize_flux=False, fov=fov, fov_units='rad',
-                                       linpol_mag=observation_params['lpolmag'],
-                                       linpol_corr=observation_params['lpolcorr'],
-                                       circpol_mag=observation_params['cpolmag'],
-                                       cirpol_corr=observation_params['cpolcorr'])
-        ehtim_movie.save_hdf5(output_path + '.hdf5')
-    else:
-        ehtim_movie = eh.movie.load_hdf5(output_path + '.hdf5')
-
-    # Save mp4 for display
-    if args.mp4 and os.path.exists(output_path + '.mp4') == False:
-        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '.mp4', verbose=False)
-
-    # Generate measurements
-    if args.scatter and os.path.exists(output_path + '_scattered.mp4') == False:
-        eps = so.MakeEpsilonScreen(ehtim_movie.xdim, ehtim_movie.ydim, rngseed=34)
-        scattering_model = so.ScatteringModel()
-        ehtim_movie = scattering_model.Scatter_Movie(ehtim_movie, eps)
-        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '_scattered.mp4', verbose=False)
-
-    output_path += ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in observation_params.items()])
-    if args.uvfits and os.path.exists(output_path + '.uvfits') == False:
-        add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
-        phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
-        ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
-        stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
-        stabilize_scan_amp = True  # if true then add a single gain error at each scan
-        jones = True  # apply jones matrix for including noise in the measurements (including leakage)
-        inv_jones = False  # no not invert the jones matrix
-        frcal = True  # True if you do not include effects of field rotation
-        dcal = False  # True if you do not include the effects of leakage
-        dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
-        rlgaincal = True
-        neggains = True
-
-        # these gains are approximated from the EHT 2017 data
-        # the standard deviation of the absolute gain of each telescope from a gain of 1
-        gain_offset = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15, 'SR': 0.0}
-        # the standard deviation of gain differences over the observation at each telescope
-        gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
-
-        obs = ehtim_movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
-                                 stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
-                                 gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
-                                 dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
-                                 dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
-
-        obs.save_uvfits(output_path + '.uvfits')
-
 def parse_arguments():
     """Parse the command-line arguments for each run.
     The arguemnts are split into general, envelope and evolution related arguments.
@@ -156,7 +54,8 @@ def parse_arguments():
                         help='Save mp4 outputs')
     parser.add_argument('--verbose',
                         action='store_true',
-                        help='True to print out noisy iteration outputs')
+                        help='True to print out noisy i'
+                             'teration outputs')
 
     # Envelope parameters
     envelope = parser.add_argument_group('Envelope parameters')
@@ -217,6 +116,11 @@ def parse_arguments():
 
     # Observation parameters
     observation = parser.add_argument_group('Observation parameters')
+    observation.add_argument('--day',
+                             nargs='+',
+                             type=int,
+                             default=[3599],
+                             help='(default value: %(default)s) Linear polarization coherence length (uas).')
     observation.add_argument('--lpolmag',
                              nargs='+',
                              type=float,
@@ -240,6 +144,109 @@ def parse_arguments():
 
     args = parser.parse_args()
     return parser, args
+
+def generate_noisy_movie(envelope_params, evolution_params, output_path, verbose):
+    """Generates and saves a noisy movie using the pynoisy library.
+    A pkl file is saved for the noisy movie and an HDF5 for the ehtim movie.
+
+    Args:
+        envelope_params (dict): dictionary with all the enevelope parameters.
+        envelope_params (dict): dictionary with all the evolution parameters.
+        verbose (bool): True for noisy iteration print out.
+    """
+    image = eh.image.load_fits(envelope_params['envelope'])
+    image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
+    fov = image.fovx()
+
+    if os.path.exists(output_path + '.pkl') == False:
+        rotation = pynoisy.RotationDirection.clockwise if evolution_params['rotation'] == 'cw' else \
+            pynoisy.RotationDirection.counter_clockwise
+        unitless_radius = eh.RADPERUAS * evolution_params['radius'] / fov
+        envelope = pynoisy.Envelope(data=image.imarr(), amplitude=evolution_params['amp'])
+        diffusion = pynoisy.RingDiffusion(
+            opening_angle=-np.deg2rad(evolution_params['angle'])*rotation.value,
+            tau=evolution_params['tau'],
+            lam=evolution_params['lam'],
+            scaling_radius=unitless_radius,
+            tensor_ratio=evolution_params['tensor_ratio']
+        )
+        advection = pynoisy.DiskAdvection(direction=rotation, scaling_radius=unitless_radius)
+        solver = pynoisy.PDESolver(advection, diffusion, envelope, forcing_strength=evolution_params['eps'])
+        movie = solver.run(evolution_length=evolution_params['dur'], verbose=verbose)
+    else:
+        movie = pynoisy.Movie()
+        movie.load(output_path + '.pkl')
+    return movie, fov
+
+def main(envelope_params, evolution_params, observation_params, obs_sgra, args, output_folder):
+    """The main function to (parallel) run the parameter survey.
+
+    Args:
+        envelope_params (dict): dictionary with all the enevelope parameters.
+        envelope_params (dict): dictionary with all the evolution parameters.
+        obs_sgra (obs): SgrA observation object.
+        args (Namespace): an argparse Namspace object with all the command line arguments.
+        output_folder (str): the output directory where all results are saved.
+    """
+    round_digits = lambda x: round(x, 3) if isinstance(x, float) else x
+    output_path = os.path.join(
+        output_folder, envelope_params['envelope'].split('/')[-1][:-5] +
+        ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in evolution_params.items()]))
+
+    noisy_movie, fov = generate_noisy_movie(envelope_params, evolution_params, output_path, args.verbose)
+    if args.pkl:
+        noisy_movie.save(output_path + '.pkl')
+
+    if os.path.exists(output_path + '.hdf5') == False:
+        ehtim_movie = ehtf.ehtim_movie(noisy_movie.frames, obs_sgra, normalize_flux=False, fov=fov, fov_units='rad',
+                                       start_time=obs_sgra.tstart - 0.08,
+                                       linpol_mag=observation_params['lpolmag'],
+                                       linpol_corr=observation_params['lpolcorr'],
+                                       circpol_mag=observation_params['cpolmag'],
+                                       cirpol_corr=observation_params['cpolcorr'])
+        ehtim_movie.save_hdf5(output_path + '.hdf5')
+    else:
+        ehtim_movie = eh.movie.load_hdf5(output_path + '.hdf5')
+
+    # Save mp4 for display
+    if args.mp4 and os.path.exists(output_path + '.mp4') == False:
+        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '.mp4', verbose=False)
+
+    # Generate measurements
+    if args.scatter and os.path.exists(output_path + '_scattered.mp4') == False:
+        eps = so.MakeEpsilonScreen(ehtim_movie.xdim, ehtim_movie.ydim, rngseed=34)
+        scattering_model = so.ScatteringModel()
+        ehtim_movie = scattering_model.Scatter_Movie(ehtim_movie, eps)
+        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '_scattered.mp4', verbose=False)
+
+    output_path += ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in observation_params.items()])
+    if args.uvfits and os.path.exists(output_path + '.uvfits') == False:
+        add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
+        phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
+        ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
+        stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
+        stabilize_scan_amp = True  # if true then add a single gain error at each scan
+        jones = True  # apply jones matrix for including noise in the measurements (including leakage)
+        inv_jones = False  # no not invert the jones matrix
+        frcal = True  # True if you do not include effects of field rotation
+        dcal = False  # True if you do not include the effects of leakage
+        dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
+        rlgaincal = True
+        neggains = True
+
+        # these gains are approximated from the EHT 2017 data
+        # the standard deviation of the absolute gain of each telescope from a gain of 1
+        gain_offset = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15, 'SR': 0.0}
+        # the standard deviation of gain differences over the observation at each telescope
+        gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
+
+        obs = ehtim_movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
+                                 stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
+                                 gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
+                                 dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
+                                 dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
+
+        obs.save_uvfits(output_path + '.uvfits')
 
 def split_arguments(parser, args):
     """Split arguments into envelope and evolution related arguments.
