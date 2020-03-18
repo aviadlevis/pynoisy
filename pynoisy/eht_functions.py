@@ -92,7 +92,8 @@ def ehtim_movie(frames, obs_sgra, total_flux=2.23, normalize_flux=True, fov=125,
     movie.reset_interp(interp='linear', bounds_error=False)
     return movie
 
-def export_movie(im_List, out, fps=10, dpi=120, scale='linear', cbar_unit = 'Jy', gamma=0.5, dynamic_range=1000.0, pad_factor=1, verbose=False):
+def export_movie(im_List, out, fps=10, dpi=120, scale='linear', cbar_unit = 'Jy', gamma=0.5, dynamic_range=1000.0,
+                 pad_factor=1, verbose=False):
     mjd_range = im_List[-1].mjd - im_List[0].mjd
     fig = plt.figure()
 

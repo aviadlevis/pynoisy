@@ -15,7 +15,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 def parse_arguments():
     """Parse the command-line arguments for each run.
-    The arguemnts are split into general, envelope and evolution related arguments.
+    The arguemnts are split into general, envelope, evolution and observations related arguments.
 
     Returns:
         parser (argparse.parser): the argument parser.
@@ -29,8 +29,7 @@ def parse_arguments():
                         default='SgrA/data/calibrated_data_oct2019/frankenstein_3599_lo_SGRA_polcal_netcal_LMTcal_10s.uvfits',
                         help='(default value: eht_home/%(default)s) Path to sgr uvfits file. Relative within the eht home directory.')
     parser.add_argument('--output_folder',
-                        default='SgrA/synthetic_data_SGRA_3599_lo/representative_models',
-                        help='(default value: eht_home/fits_path/%(default)s) Path to output folder. Relative within the fits_path directory.')
+                        help='Relative within the fits_path directory. If none is given, the current date-time is taken as the output folder.')
     parser.add_argument('--args_path',
                         help='Path to a json input argument file.')
     parser.add_argument('--n_jobs',
@@ -60,8 +59,7 @@ def parse_arguments():
     # Envelope parameters
     envelope = parser.add_argument_group('Envelope parameters')
     envelope.add_argument('--fits_path',
-                          nargs='+',
-                          default=['SgrA/synthetic_data_SGRA_3599_lo/representative_models'],
+                          default='SgrA/synthetic_data_SGRA_3599_lo/representative_models',
                           help='(default value: eht_home/%(default)s) Paths to envelope fits files. Relative within the eht home directory.')
 
     # Evolution parameters
@@ -143,16 +141,22 @@ def parse_arguments():
                              help='(default value: %(default)s) Circular polarization coherence length (uas).')
 
     args = parser.parse_args()
+
+    args.output_folder = time.strftime("%d-%b-%Y-%H:%M:%S") if args.output_folder is None else args.output_folder
     return parser, args
 
 def generate_noisy_movie(envelope_params, evolution_params, output_path, verbose):
-    """Generates and saves a noisy movie using the pynoisy library.
+    """Generates and a noisy movie using the pynoisy library.
     A pkl file is saved for the noisy movie and an HDF5 for the ehtim movie.
 
     Args:
         envelope_params (dict): dictionary with all the enevelope parameters.
         envelope_params (dict): dictionary with all the evolution parameters.
         verbose (bool): True for noisy iteration print out.
+
+    Returns:
+        movie (pynoisy.Movie): A movie object containing the frames
+        fov (float): the field of view in radians
     """
     image = eh.image.load_fits(envelope_params['envelope'])
     image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
@@ -177,6 +181,45 @@ def generate_noisy_movie(envelope_params, evolution_params, output_path, verbose
         movie = pynoisy.Movie()
         movie.load(output_path + '.pkl')
     return movie, fov
+
+def generate_observations(movie, obs_sgra, output_path):
+    """Generates sgra-like obeservations from the movie
+
+    Args:
+        movie (ehtim.Movie): a Movie object
+        obs_sgra (observation): An Observation object with sgra observation parameters
+        output_path (str): output path for caltable
+
+    Returns:
+        obs (observation): An Observation object with sgra-like observation of the input movie.
+    """
+    add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
+    phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
+    ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
+    stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
+    stabilize_scan_amp = True  # if true then add a single gain error at each scan
+    jones = True  # apply jones matrix for including noise in the measurements (including leakage)
+    inv_jones = False  # no not invert the jones matrix
+    frcal = True  # True if you do not include effects of field rotation
+    dcal = False  # True if you do not include the effects of leakage
+    dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
+    rlgaincal = True
+    neggains = True
+
+    # these gains are approximated from the EHT 2017 data
+    # the standard deviation of the absolute gain of each telescope from a gain of 1
+    gain_offset = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15,
+                   'SR': 0.0}
+    # the standard deviation of gain differences over the observation at each telescope
+    gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
+
+    obs = movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
+                             stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
+                             gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
+                             dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
+                             dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
+
+    return obs
 
 def main(envelope_params, evolution_params, observation_params, obs_sgra, args, output_folder):
     """The main function to (parallel) run the parameter survey.
@@ -221,39 +264,20 @@ def main(envelope_params, evolution_params, observation_params, obs_sgra, args, 
 
     output_path += ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in observation_params.items()])
     if args.uvfits and os.path.exists(output_path + '.uvfits') == False:
-        add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
-        phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
-        ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
-        stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
-        stabilize_scan_amp = True  # if true then add a single gain error at each scan
-        jones = True  # apply jones matrix for including noise in the measurements (including leakage)
-        inv_jones = False  # no not invert the jones matrix
-        frcal = True  # True if you do not include effects of field rotation
-        dcal = False  # True if you do not include the effects of leakage
-        dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
-        rlgaincal = True
-        neggains = True
-
-        # these gains are approximated from the EHT 2017 data
-        # the standard deviation of the absolute gain of each telescope from a gain of 1
-        gain_offset = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15, 'SR': 0.0}
-        # the standard deviation of gain differences over the observation at each telescope
-        gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
-
-        obs = ehtim_movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
-                                 stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
-                                 gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
-                                 dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
-                                 dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
-
+        obs = generate_observations(ehtim_movie, obs_sgra, output_path)
         obs.save_uvfits(output_path + '.uvfits')
 
 def split_arguments(parser, args):
     """Split arguments into envelope and evolution related arguments.
 
+    Args:
+        parser (argparse.parser): the argument parser.
+        args (Namespace): an argparse Namspace object with all the command line arguments.
+
     Returns:
-        envelope_params (dict): dictionary with all the enevelope parameters.
-        envelope_params (dict): dictionary with all the evolution parameters.
+        envelope_args (dict): dictionary with all the enevelope parameters.
+        evolution_args (dict): dictionary with all the evolution parameters.
+        observation_args (dict): dictionary with all the observation parameters.
     """
     arg_groups = {}
     for group in parser._action_groups:
@@ -261,9 +285,9 @@ def split_arguments(parser, args):
         arg_groups[group.title] = argparse.Namespace(**group_dict)
 
     envelope_args = arg_groups['Envelope parameters'].__dict__
-    envelope_args['envelope'] = []
-    for path in envelope_args['fits_path']:
-        envelope_args['envelope'].extend(glob.glob(os.path.join(args.eht_home, path) + '/*.fits'))
+    envelope_args['envelope'] = glob.glob(os.path.join(args.eht_home, envelope_args.pop('fits_path') + '/*.fits'))
+    if not envelope_args['envelope']:
+        raise AttributeError('No fits envelopes found at folder: {}'.format(os.path.join(args.eht_home, args.fits_path)))
 
     evolution_args = arg_groups['Evolution parameters'].__dict__
     observation_args = arg_groups['Observation parameters'].__dict__
@@ -272,15 +296,20 @@ def split_arguments(parser, args):
 def load_save_parameters(parser, args):
     """Load and save run arguments or resume previous run.
 
+    Args:
+        parser (argparse.parser): the argument parser.
+        args (Namespace): an argparse Namspace object with all the command line arguments.
+
     Returns:
-        envelope_params (dict): dictionary with all the enevelope parameters.
-        envelope_params (dict): dictionary with all the evolution parameters.
+        envelope_args (dict): dictionary with all the enevelope parameters.
+        evolution_args (dict): dictionary with all the evolution parameters.
+        observation_args (dict): dictionary with all the observation parameters.
     """
     if args.resume_run is not None:
         output_folder = os.path.join(args.eht_home, args.resume_run)
         args.args_path = os.path.join(output_folder, 'args.txt')
     else:
-        output_folder = os.path.join(args.eht_home, args.output_folder, time.strftime("%d-%b-%Y-%H:%M:%S"))
+        output_folder = os.path.join(args.eht_home, args.fits_path, args.output_folder)
 
     if args.args_path is not None:
         with open(args.args_path, 'r') as file:

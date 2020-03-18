@@ -70,7 +70,6 @@ def params_from_uvfile(uvfile, parameters):
         params[param] = uvfile.split('.uvfits')[0].split(param)[1].split('_')[0]
     return params
 
-
 def compute_qmetric_df(uvfile, date, tavg, bintime, segtime, diftime, detrend_deg, parameters):
     """Compute a qmetric dataframe
     """
