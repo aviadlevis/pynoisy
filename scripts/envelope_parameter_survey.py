@@ -256,11 +256,13 @@ def main(envelope_params, evolution_params, observation_params, obs_sgra, args, 
         ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '.mp4', verbose=False)
 
     # Generate measurements
-    if args.scatter and os.path.exists(output_path + '_scattered.mp4') == False:
+    if args.scatter and os.path.exists(output_path + '_scattered.hdf5') == False:
         eps = so.MakeEpsilonScreen(ehtim_movie.xdim, ehtim_movie.ydim, rngseed=34)
         scattering_model = so.ScatteringModel()
         ehtim_movie = scattering_model.Scatter_Movie(ehtim_movie, eps)
-        ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '_scattered.mp4', verbose=False)
+        ehtim_movie.save_hdf5(output_path + '_scattered.hdf5')
+        if args.mp4 and os.path.exists(output_path + '_scattered.mp4') == False:
+            ehtf.export_movie(ehtim_movie.im_list(), fps=10, out=output_path + '_scattered.mp4', verbose=False)
 
     output_path += ''.join(['_{}{}'.format(key, round_digits(value)) for key, value in observation_params.items()])
     if args.uvfits and os.path.exists(output_path + '.uvfits') == False:

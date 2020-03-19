@@ -70,6 +70,11 @@ def params_from_uvfile(uvfile, parameters):
         params[param] = uvfile.split('.uvfits')[0].split(param)[1].split('_')[0]
     return params
 
+def zero_baseline_std(obs):
+    tmp = obs.unpack(['u', 'v', 'amp'], debias=True)
+    amp, u, v = tmp['amp'], tmp['u'], tmp['v']
+    return np.std(amp[np.sqrt(u**2 + v**2) < 1e8])
+
 def compute_qmetric_df(uvfile, date, tavg, bintime, segtime, diftime, detrend_deg, parameters):
     """Compute a qmetric dataframe
     """
@@ -94,8 +99,8 @@ def compute_qmetric_df(uvfile, date, tavg, bintime, segtime, diftime, detrend_de
         if triangle not in triangle_list:
             triangle_list.append(triangle)
 
-
-    qmetric = {'triangle': [], 'date': [date]*len(triangle_list), 'q': [], 'dq': [], }
+    zbl_std = zero_baseline_std(obs)
+    qmetric = {'triangle': [], 'date': [date]*len(triangle_list), 'q': [], 'dq': [], 'zbl_std': [zbl_std]*len(triangle_list)}
     params = params_from_uvfile(uvfile, parameters)
     for key, value in params.items():
         qmetric[key] = [value]*len(triangle_list)
