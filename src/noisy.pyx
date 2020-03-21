@@ -39,9 +39,9 @@ cdef extern from "model_disk.c":
     void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
 
 cdef extern from "main.c":
-    int cmain(double PARAM_RAT, double PARAM_AMP, double PARAM_EPS, double tf,
+    int cmain(double PARAM_RAT, double PARAM_EPS, double tf,
               double* principal_angle_image, double* advection_velocity_image,
-              double* diffusion_coefficient_image, double* correlation_time_image, double* envelope_image,
+              double* diffusion_coefficient_image, double* correlation_time_image,
               double* output_video, bool verbose)
     void xy_image(double x[N][N], double y[N][N])
 
@@ -55,18 +55,21 @@ def get_image_size():
     """TODO"""
     return [N, N]
 
-def run_main(PARAM_RAT, PARAM_AMP, PARAM_EPS, evolution_length,
+def get_num_frames():
+    """TODO"""
+    return NUM_IMAGES
+
+def run_main(PARAM_RAT, PARAM_EPS, evolution_length,
              np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
              np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
              np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
              np.ndarray[double, ndim=2, mode="c"] c_correlation_time_image,
-             np.ndarray[double, ndim=2, mode="c"] c_envelope_image,
              verbose):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
-    cmain(PARAM_RAT, PARAM_AMP, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
+    cmain(PARAM_RAT, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
-          &c_envelope_image[0,0], &output_video[0,0,0], verbose)
+          &output_video[0,0,0], verbose)
     return np.asarray(output_video)
 
 

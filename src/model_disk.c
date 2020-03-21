@@ -264,4 +264,3 @@ void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
 #endif
 
 }
-

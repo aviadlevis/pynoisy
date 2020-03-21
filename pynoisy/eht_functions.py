@@ -148,3 +148,43 @@ def export_movie(im_List, out, fps=10, dpi=120, scale='linear', cbar_unit = 'Jy'
     writer = animation.writers['ffmpeg'](fps=fps, bitrate=1e6)
     ani.save(out,writer=writer,dpi=dpi)
     plt.close(fig)
+
+def generate_observations(movie, obs_sgra, output_path):
+    """Generates sgra-like obeservations from the movie
+
+    Args:
+        movie (ehtim.Movie): a Movie object
+        obs_sgra (observation): An Observation object with sgra observation parameters
+        output_path (str): output path for caltable
+
+    Returns:
+        obs (observation): An Observation object with sgra-like observation of the input movie.
+    """
+    add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
+    phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
+    ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
+    stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
+    stabilize_scan_amp = True  # if true then add a single gain error at each scan
+    jones = True  # apply jones matrix for including noise in the measurements (including leakage)
+    inv_jones = False  # no not invert the jones matrix
+    frcal = True  # True if you do not include effects of field rotation
+    dcal = False  # True if you do not include the effects of leakage
+    dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
+    rlgaincal = True
+    neggains = True
+
+    # these gains are approximated from the EHT 2017 data
+    # the standard deviation of the absolute gain of each telescope from a gain of 1
+    gain_offset = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15,
+                   'SR': 0.0}
+    # the standard deviation of gain differences over the observation at each telescope
+    gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15,
+             'SR': 0.0}
+
+    obs = movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
+                             stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
+                             gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
+                             dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
+                             dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
+
+    return obs

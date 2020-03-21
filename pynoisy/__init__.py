@@ -11,6 +11,7 @@ import os
 import skimage.transform
 from scipy import interpolate
 import copy
+from matplotlib import animation
 
 class RotationDirection(Enum):
     clockwise = -1.0
@@ -21,7 +22,7 @@ class Image(object):
     """TODO"""
     def __init__(self):
         self._x, self._y = core.get_xy_grid()
-        self._image_shape = core.get_image_size()
+        self._image_size = core.get_image_size()
         self._r = np.sqrt(self.x ** 2 + self.y ** 2)
 
     def shift(self, x0, y0):
@@ -30,8 +31,8 @@ class Image(object):
         self._y += y0
 
     @property
-    def image_shape(self):
-        return self._image_shape
+    def image_size(self):
+        return self._image_size
 
     @property
     def x(self):
@@ -50,11 +51,11 @@ class Advection(Image):
     """TODO"""
     def __init__(self, velocity=None):
         super().__init__()
-        self._v = np.empty(shape=self.image_shape + [2], dtype=np.float64) if velocity is None else np.array(velocity, dtype=np.float64, order='C')
+        self._v = np.empty(shape=self.image_size + [2], dtype=np.float64) if velocity is None else np.array(velocity, dtype=np.float64, order='C')
 
     def plot_velocity(self, downscale_factor=0.125):
         """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_shape)).astype(int)
+        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
         scaled_v = skimage.transform.resize(self.v, new_shape)
         scaled_x = skimage.transform.resize(self.x, new_shape)
         scaled_y = skimage.transform.resize(self.y, new_shape)
@@ -93,8 +94,8 @@ class DiskAdvection(Advection):
 
     def __add__(self, other):
         """TODO"""
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_shape[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_shape[1])
+        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
+        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
         xx, yy = np.meshgrid(x, y, indexing='ij')
         v1x = interpolate.interp2d(self.x[:, 0], self.y[0], self.v[...,0], bounds_error=False, fill_value=0.0)
         v2x = interpolate.interp2d(other.x[:, 0], other.y[0], other.v[...,0], bounds_error=False, fill_value=0.0)
@@ -111,9 +112,9 @@ class Diffusion(Image):
     """TODO"""
     def __init__(self, principle_angle=None, diffusion_coefficient=None, correlation_time=None, tensor_ratio=1.0):
         super().__init__()
-        self._principle_angle = np.empty(shape=self.image_shape, dtype=np.float64)  if principle_angle is None else np.array(principle_angle, dtype=np.float64, order='C')
-        self._diffusion_coefficient = np.empty(shape=self.image_shape, dtype=np.float64) if diffusion_coefficient is None else np.array(diffusion_coefficient, dtype=np.float64, order='C')
-        self._correlation_time = np.empty(shape=self.image_shape, dtype=np.float64) if correlation_time is None else np.array(correlation_time, dtype=np.float64, order='C')
+        self._principle_angle = np.empty(shape=self.image_size, dtype=np.float64)  if principle_angle is None else np.array(principle_angle, dtype=np.float64, order='C')
+        self._diffusion_coefficient = np.empty(shape=self.image_size, dtype=np.float64) if diffusion_coefficient is None else np.array(diffusion_coefficient, dtype=np.float64, order='C')
+        self._correlation_time = np.empty(shape=self.image_size, dtype=np.float64) if correlation_time is None else np.array(correlation_time, dtype=np.float64, order='C')
         self._correlation_length = None
         self._tensor_ratio = tensor_ratio
 
@@ -124,8 +125,8 @@ class Diffusion(Image):
         print('Updating diffusion coefficient according to correlation length and time: D = 2.0 * l**2 / t')
 
     def __add__(self, other):
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_shape[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_shape[1])
+        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
+        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
         xx, yy = np.meshgrid(x, y, indexing='ij')
 
         dc1 = interpolate.interp2d(self.x[:,0], self.y[0], self.diffusion_coefficient, bounds_error=False, fill_value = 0.0)
@@ -157,7 +158,7 @@ class Diffusion(Image):
 
     def plot_principal_axis(self, downscale_factor=0.125):
         """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_shape)).astype(int)
+        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
         vx = skimage.transform.resize(np.cos(self.principle_angle), new_shape)
         vy = skimage.transform.resize(np.sin(self.principle_angle), new_shape)
         scaled_x = skimage.transform.resize(self.x, new_shape)
@@ -167,7 +168,7 @@ class Diffusion(Image):
 
     def plot_secondary_axis(self, downscale_factor=0.125):
         """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_shape)).astype(int)
+        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
         vx = skimage.transform.resize(-np.sin(self.principle_angle), new_shape)
         vy = skimage.transform.resize(np.cos(self.principle_angle), new_shape)
         scaled_x = skimage.transform.resize(self.x, new_shape)
@@ -279,38 +280,38 @@ class Envelope(Image):
     """
     The envelope function multiplies the random fields to create synthetic images.
     The equation for each field is: image = exp(-amplitude*del)*envelope
-
-    Parameters
-    ----------
-    amplitude: float, default = 0.05
-        strength of perturbation; image = exp(-amplitude*del)*envelope
     """
-    def __init__(self, data=None, amplitude=0.05):
+    def __init__(self, data=None):
         super().__init__()
-        self._data = np.ones(shape=self.image_shape, dtype=np.float64, order='C') if data is None else data
-        self._amplitude = amplitude
+        self._data = np.ones(shape=self.image_size, dtype=np.float64, order='C') if data is None else data
 
     def __add__(self, other):
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_shape[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_shape[1])
+        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
+        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
         xx, yy = np.meshgrid(x, y, indexing='ij')
         f1 = interpolate.interp2d(self.x[:,0], self.y[0], self.data, bounds_error=False, fill_value = 0.0)
         f2 = interpolate.interp2d(other.x[:,0], other.y[0], other.data, bounds_error=False, fill_value = 0.0)
-        envelope = Envelope(amplitude=self.amplitude)
+        envelope = Envelope(np.array(f1(x, y) + f2(x, y), dtype=np.float64, order='C'))
         envelope._x = xx
         envelope._y = yy
-        envelope._data = np.array(f1(x, y) + f2(x, y), dtype=np.float64, order='C')
         return envelope
 
     def __mul__(self, other):
-        envelope = copy.copy(self)
-        envelope._data = np.array(self.data * other, dtype=np.float64, order='C')
-        return envelope
+        return Envelope(np.array(self.data * other, dtype=np.float64, order='C'))
+
 
     def __truediv__(self, other):
-        envelope = copy.copy(self)
-        envelope._data /= other
-        return envelope
+        return Envelope(np.array(self.data / other, dtype=np.float64, order='C'))
+
+    def apply(self, movie, amplitude=0.05):
+        """
+        Parameters
+        ----------
+        amplitude: float, default = 0.05
+            strength of perturbation; image = exp(-amplitude*del)*envelope
+        """
+        frames = self.data * np.exp(-amplitude * movie.frames)
+        return Movie(frames, movie.duration)
 
     def imshow(self):
         """TODO"""
@@ -320,13 +321,10 @@ class Envelope(Image):
         cax = divider.append_axes("right", size="5%", pad=0.1)
         plt.colorbar(im, cax=cax)
 
+
     @property
     def data(self):
         return self._data
-
-    @property
-    def amplitude(self):
-        return self._amplitude
 
 
 class RingEnvelope(Envelope):
@@ -453,11 +451,11 @@ class DiskEnvelope(Envelope):
 
 class PDESolver(object):
     """TODO"""
-    def __init__(self, advection=Advection(), diffusion=Diffusion(), envelope=Envelope(), forcing_strength=1.0):
+    def __init__(self, advection=Advection(), diffusion=Diffusion(), forcing_strength=1.0):
         self._forcing_strength = forcing_strength
         self.set_advection(advection)
         self.set_diffusion(diffusion)
-        self.set_envelope(envelope)
+        self._num_frames = core.get_num_frames()
 
     def set_advection(self, advection):
         """TODO"""
@@ -467,25 +465,23 @@ class PDESolver(object):
         """TODO"""
         self._diffusion = diffusion
 
-    def set_envelope(self, envelope):
-        """TODO"""
-        self._envelope = envelope
-
     def run(self, evolution_length=0.1, verbose=True):
         """TODO"""
         frames = core.run_main(
             self.diffusion.tensor_ratio,
-            self.envelope.amplitude,
             self.forcing_strength,
             evolution_length,
             self.diffusion.principle_angle,
             self.advection.v,
             self.diffusion.diffusion_coefficient,
             self.diffusion.correlation_time,
-            self.envelope.data,
             verbose
         )
         return Movie(frames, duration=evolution_length)
+
+    @property
+    def num_frames(self):
+        return self._num_frames
 
     @property
     def forcing_strength(self):
@@ -499,10 +495,6 @@ class PDESolver(object):
     def diffusion(self):
         return self._diffusion
 
-    @property
-    def envelope(self):
-        return self._envelope
-
 
 class Movie(object):
     """TODO"""
@@ -510,6 +502,31 @@ class Movie(object):
     def __init__(self, frames=None, duration=None):
         self._frames = frames
         self._duration = duration
+        self._image_size = core.get_image_size()
+
+    def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
+        """TODO"""
+        # initialization function: plot the background of each frame
+        def init():
+            im.set_data(np.zeros(self.image_size), vmin=-5, vmax=5)
+            return [im]
+
+        # animation function.  This is called sequentially
+        def animate(i):
+            im.set_array(self.frames[i])
+            return [im]
+
+        fig, ax = plt.subplots()
+        im = plt.imshow(np.zeros(self.image_size))
+        plt.colorbar()
+        vmin = self.frames.min() if vmin is None else vmin
+        vmax = self.frames.min() if vmax is None else vmax
+        im.set_clim(vmin, vmax)
+        anim = animation.FuncAnimation(fig, animate, frames=self.num_frames, interval=1e3 / fps)
+
+        if output is not None:
+            anim.save(output, writer='imagemagick', fps=fps)
+        return anim
 
     def duplicate_single_frame(self, frame, num_frames):
         self._frames = [frame] * num_frames
@@ -540,6 +557,10 @@ class Movie(object):
         data = file.read()
         file.close()
         self.__dict__ = pickle.loads(data)
+
+    @property
+    def image_size(self):
+        return self._image_size
 
     @property
     def duration(self):

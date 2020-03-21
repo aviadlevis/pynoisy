@@ -25,20 +25,17 @@ CFG 22 Dec 2019
 
 int cmain(
     double PARAM_RAT,
-    double PARAM_AMP,
     double PARAM_EPS,
     double tf,
     double* principal_angle_image,
     double* advection_velocity_image,
     double* diffusion_coefficient_image,
     double* correlation_time_image,
-    double* envelope_image,
     double* output_video,
     bool verbose
     )
 {
     static double _del[N][N];
-    static double fake_image[N][N];
 
     void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
         double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
@@ -48,7 +45,6 @@ int cmain(
         double dt);
     void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
     void evolve_decay(double _del[N][N], double T[N][N], double dt);
-    void evolve_noise(double _del[N][N], double dt, double PARAM_EPS);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -59,7 +55,6 @@ int cmain(
 
     int i,j ;
     double Dtl = tf / (double) NUM_IMAGES;   /* image file output cadence */
-    void apply_envelope(double _del[N][N], double fake_image[N][N], double* envelope_image, double PARAM_AMP);
 
     /* calculate some grid functions */
     static double v[N][N][4][2];
@@ -128,44 +123,36 @@ int cmain(
     int nstep = 0;
     double rms = 0.;
     double t = 0.;
-    double tl = 0.;
-    double F;
+    double tl = Dtl;
+    tf += Dtl;
     while(t < tf){
 
-        /* periodically execute diagnostics */
-        if(t > tl) {
-            /* check rms of random field */
-            rms = 0.;
-            for(i=0;i<N;i++)
-            for(j=0;j<N;j++) rms += _del[i][j]*_del[i][j];
-            rms = sqrt(rms)/N;
-
-            /* transform random field into image */
-            apply_envelope(_del, fake_image, envelope_image, PARAM_AMP);
-
-            /* get light curve */
-            F = 0.;
-            for(i=0;i<N;i++)
-            for(j=0;j<N;j++) {
-                F += fake_image[i][j]*dx*dy;
-                output_video[n] = fake_image[i][j];
-                n++;
-            }
-            if (verbose) {
-                fprintf(stderr,"%lf %lf %lf\n",t, F, rms);
-            }
-            /* set time for next diagnostic output */
-            tl += Dtl;
-        }
-
-        /* operator split */
+         /* operator split */
         evolve_noise(_del, dt, PARAM_EPS);
         evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
         evolve_advection(_del, v, dt);
         evolve_decay(_del, T, dt);
+
+        /* periodically execute diagnostics */
+        if(t > tl) {
+            /* check rms and output  random field */
+            rms = 0.;
+            for(i=0;i<N;i++)
+            for(j=0;j<N;j++) {
+                rms += _del[i][j]*_del[i][j];
+                output_video[n] = _del[i][j];
+                n++;
+            }
+            rms = sqrt(rms)/N;
+
+            if (verbose) {
+                fprintf(stderr,"%lf %lf\n",t, rms);
+            }
+            /* set time for next diagnostic output */
+            tl += Dtl;
+        }
         nstep++;
         t += dt;
-
     }
     /*
     FILE *fp = fopen("noisy.out", "w");
