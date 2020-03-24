@@ -10,8 +10,8 @@ import pickle
 import os
 import skimage.transform
 from scipy import interpolate
-import copy
 from matplotlib import animation
+import ehtim as eh
 
 class RotationDirection(Enum):
     clockwise = -1.0
@@ -29,6 +29,9 @@ class Image(object):
         """TODO"""
         self._x += x0
         self._y += y0
+
+    def rotate(self, angle):
+        self._data = skimage.transform.rotate(self.data, angle)
 
     @property
     def image_size(self):
@@ -52,6 +55,23 @@ class Advection(Image):
     def __init__(self, velocity=None):
         super().__init__()
         self._v = np.empty(shape=self.image_size + [2], dtype=np.float64) if velocity is None else np.array(velocity, dtype=np.float64, order='C')
+
+    def __add__(self, other):
+        advection = Advection(velocity=self.v + other.v)
+        return advection
+
+    def __sub__(self, other):
+        advection = Advection(velocity=self.v - other.v)
+        return advection
+
+    def __mul__(self, other):
+        assert np.isscalar(other), 'Only scalar * advection multiplication is supported'
+        advection = Advection(velocity=self.v * other)
+        return advection
+
+    def __neg__(self):
+        advection = Advection(velocity=-self.v)
+        return advection
 
     def plot_velocity(self, downscale_factor=0.125):
         """TODO"""
@@ -123,6 +143,18 @@ class Diffusion(Image):
         self._correlation_length = correlation_length
         self._diffusion_coefficient = 2.0 * correlation_length**2 / self._correlation_time
         print('Updating diffusion coefficient according to correlation length and time: D = 2.0 * l**2 / t')
+
+    def get_tensor(self):
+        return core.get_diffusion_tensor(self.tensor_ratio, self.principle_angle, self.diffusion_coefficient)
+
+    def get_laplacian(self, frames):
+        lap = core.get_laplacian(
+            self.tensor_ratio,
+            self.principle_angle,
+            self.diffusion_coefficient,
+            np.array(frames, dtype=np.float64, order='C')
+        )
+        return lap
 
     def __add__(self, other):
         x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
@@ -248,11 +280,31 @@ class RingDiffusion(Diffusion):
                  scaling_radius=0.2,
                  tensor_ratio=0.1):
         super().__init__()
+        self._opening_angle = opening_angle
+        self._tau = tau
+        self._lam = lam
+        self._scaling_radius = scaling_radius
+        self._tensor_ratio = tensor_ratio
         self._principle_angle = core.get_disk_angle(opening_angle)
         self._correlation_time = core.get_disk_correlation_time(tau, scaling_radius)
         self._diffusion_coefficient = core.get_disk_diffusion_coefficient(tau, lam, scaling_radius)
         self._correlation_length =  core.get_disk_correlation_length(scaling_radius, lam)
-        self._tensor_ratio = tensor_ratio
+
+    @property
+    def opening_angle(self):
+        return self._opening_angle
+
+    @property
+    def tau(self):
+        return self._tau
+
+    @property
+    def lam(self):
+        return self._lam
+
+    @property
+    def scaling_radius(self):
+        return self._scaling_radius
 
 
 class DiskDiffusion(Diffusion):
@@ -302,6 +354,11 @@ class Envelope(Image):
 
     def __truediv__(self, other):
         return Envelope(np.array(self.data / other, dtype=np.float64, order='C'))
+
+    def load_fits(self, path):
+        image = eh.image.load_fits(path)
+        image = image.regrid_image(image.fovx(), self.image_size[0])
+        return Envelope(data=image.imarr())
 
     def apply(self, movie, amplitude=0.05):
         """
@@ -479,6 +536,20 @@ class PDESolver(object):
         )
         return Movie(frames, duration=evolution_length)
 
+    def run_adjoint(self, source, evolution_length=0.1, verbose=True):
+        """TODO"""
+        frames = core.run_adjoint(
+            self.diffusion.tensor_ratio,
+            evolution_length,
+            self.diffusion.principle_angle,
+            self.advection.v,
+            self.diffusion.diffusion_coefficient,
+            self.diffusion.correlation_time,
+            np.array(source, dtype=np.float64, order='C'),
+            verbose
+        )
+        return Movie(frames, duration=evolution_length)
+
     @property
     def num_frames(self):
         return self._num_frames
@@ -503,6 +574,11 @@ class Movie(object):
         self._frames = frames
         self._duration = duration
         self._image_size = core.get_image_size()
+
+    def __mul__(self, other):
+        assert np.isscalar(other), 'Only scalar * Movie multiplication is supported'
+        movie = Movie(frames=self.frames * other, duration=self.duration)
+        return movie
 
     def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
         """TODO"""
@@ -530,6 +606,9 @@ class Movie(object):
 
     def duplicate_single_frame(self, frame, num_frames):
         self._frames = [frame] * num_frames
+
+    def reverse_time(self):
+        return Movie(np.flip(self.frames, axis=0), duration=self.duration)
 
     def save(self, path):
         """Save movie to file.
@@ -584,3 +663,20 @@ class Movie(object):
             return self.duration / self.num_frames
         else:
             return None
+
+
+class DynamicEnvelope(Movie):
+    """TODO"""
+
+    def __init__(self, frames=None, duration=None):
+        super().__init__(frames, duration)
+
+    def apply(self, movie, amplitude=0.05):
+        """
+        Parameters
+        ----------
+        amplitude: float, default = 0.05
+            strength of perturbation; image = exp(-amplitude*del)*envelope
+        """
+        frames = self.frames * np.exp(-amplitude * movie.frames)
+        return Movie(frames, movie.duration)

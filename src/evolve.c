@@ -137,6 +137,149 @@ void grid_function_calc(
 }
 
 
+void grid_function_calc_F(
+    double F_coeff_gradx[N][N][4],
+    double F_coeff_grady[N][N][4],
+    double PARAM_RAT,
+    double* principal_angle_image,
+    double* diffusion_coefficient_image
+    ) {
+    void principal_axis_from_angle(double *e1x, double *e1y, double *e2x, double *e2y, double principal_angle);
+
+    /* preparatory work: calculate some grid functions */
+    int i,j,k;
+    double e1x,e1y,e2x,e2y;
+    double K1,K2;
+    double principal_angle;
+
+    k=0;
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+
+        if (i == N-1) {
+            principal_angle = principal_angle_image[k] + (principal_angle_image[k] - principal_angle_image[k-N]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k-N]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k+N]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k+N]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_gradx[i][j][0] = K1*e1x*e1x + K2*e2x*e2x ;
+        F_coeff_grady[i][j][0] = K1*e1x*e1y + K2*e2x*e2y ;
+
+        if (j == N-1) {
+            principal_angle = principal_angle_image[k] + (principal_angle_image[k] - principal_angle_image[k-1]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k-1]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k+1]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k+1]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_gradx[i][j][1] = K1*e1y*e1x + K2*e2y*e2x ;
+        F_coeff_grady[i][j][1] = K1*e1y*e1y + K2*e2y*e2y ;
+
+
+        if (i == 0) {
+            principal_angle = principal_angle_image[k] - (principal_angle_image[k] - principal_angle_image[k+N]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k+N]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k-N]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k-N]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_gradx[i][j][2] = K1*e1x*e1x + K2*e2x*e2x ;
+        F_coeff_grady[i][j][2] = K1*e1x*e1y + K2*e2x*e2y ;
+
+        if (j == 0) {
+            principal_angle = principal_angle_image[k] - (principal_angle_image[k] - principal_angle_image[k+1]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k+1]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k-1]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k-1]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_gradx[i][j][3] = K1*e1y*e1x + K2*e2y*e2x ;
+        F_coeff_grady[i][j][3] = K1*e1y*e1y + K2*e2y*e2y ;
+    }
+}
+
+void get_diffusion_tensor_image(
+    double* F_coeff_grad,
+    double PARAM_RAT,
+    double* principal_angle_image,
+    double* diffusion_coefficient_image
+    ) {
+    void principal_axis_from_angle(double *e1x, double *e1y, double *e2x, double *e2y, double principal_angle);
+
+    /* preparatory work: calculate some grid functions */
+    int i,j,k,m;
+    double e1x,e1y,e2x,e2y;
+    double K1,K2;
+    double principal_angle;
+
+    k=0;
+    m=0;
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+
+        if (i == N-1) {
+            principal_angle = principal_angle_image[k] + (principal_angle_image[k] - principal_angle_image[k-N]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k-N]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k+N]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k+N]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_grad[m++] = K1*e1x*e1x + K2*e2x*e2x ;
+        F_coeff_grad[m++] = K1*e1x*e1y + K2*e2x*e2y ;
+
+        if (j == N-1) {
+            principal_angle = principal_angle_image[k] + (principal_angle_image[k] - principal_angle_image[k-1]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k-1]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k+1]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k+1]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_grad[m++] = K1*e1y*e1x + K2*e2y*e2x ;
+        F_coeff_grad[m++] = K1*e1y*e1y + K2*e2y*e2y ;
+
+
+        if (i == 0) {
+            principal_angle = principal_angle_image[k] - (principal_angle_image[k] - principal_angle_image[k+N]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k+N]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k-N]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k-N]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_grad[m++] = K1*e1x*e1x + K2*e2x*e2x ;
+        F_coeff_grad[m++] = K1*e1x*e1y + K2*e2x*e2y ;
+
+        if (j == 0) {
+            principal_angle = principal_angle_image[k] - (principal_angle_image[k] - principal_angle_image[k+1]) / 2.0;
+            K1 = diffusion_coefficient_image[k] + (diffusion_coefficient_image[k] - diffusion_coefficient_image[k+1]) / 2.0;
+        } else {
+            principal_angle = (principal_angle_image[k] + principal_angle_image[k-1]) / 2.0;
+            K1 = (diffusion_coefficient_image[k] + diffusion_coefficient_image[k-1]) / 2.0;
+        }
+        principal_axis_from_angle(&e1x,&e1y,&e2x,&e2y,principal_angle);
+        K2 = PARAM_RAT*K1;
+        F_coeff_grad[m++] = K1*e1y*e1x + K2*e2y*e2x ;
+        F_coeff_grad[m++] = K1*e1y*e1y + K2*e2y*e2y ;
+
+        k++;
+    }
+}
+
+
 void principal_axis_from_angle(double *e1x, double *e1y, double *e2x, double *e2y, double principal_angle)
 {
     double s,c;
@@ -147,6 +290,84 @@ void principal_axis_from_angle(double *e1x, double *e1y, double *e2x, double *e2
     *e2x = -s;
     *e2y = c;
 }
+
+void get_laplacian_image(
+    double* lap,
+    double PARAM_RAT,
+    double* principal_angle_image,
+    double* diffusion_coefficient_image,
+    double* del)
+{
+    void grid_function_calc_F(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], double PARAM_RAT,
+                              double* principal_angle_image, double* diffusion_coefficient_image);
+    double gradx,grady,Fxp,Fxm,Fyp,Fym;
+    double dx=PARAM_FOV/N;
+    double dy=PARAM_FOV/N;
+    int i,j,ip,jp,im,jm,n;
+
+    for(n=0;n<NUM_IMAGES;n++) {
+        double F_coeff_gradx[N][N][4] = {{{0.}}};
+        double F_coeff_grady[N][N][4] = {{{0.}}};
+        grid_function_calc_F(F_coeff_gradx, F_coeff_grady, PARAM_RAT, principal_angle_image, diffusion_coefficient_image);
+
+        for(i=0;i<N;i++)
+        for(j=0;j<N;j++) {
+            ip = (i+N+1)%N ;
+            im = (i+N-1)%N ;
+            jp = (j+N+1)%N ;
+            jm = (j+N-1)%N ;
+
+            /* F = -K1 e1 (e1 . grad) - K2 e2 (e2 . grad) */
+            /* gradient, centered at ...  */
+            /* upper x face */
+            gradx = (del[n*N*N+ip*N+j] - del[n*N*N+i*N+j])/dx;
+            grady = 0.5*(
+                (del[n*N*N+i*N+jp] - del[n*N*N+i*N+jm])/(2.*dy) +
+                (del[n*N*N+ip*N+jp] - del[n*N*N+ip*N+jm])/(2.*dy)
+                );
+            Fxp = -(
+                F_coeff_gradx[i][j][0]*gradx +
+                F_coeff_grady[i][j][0]*grady
+                );
+
+            /* upper y face */
+            gradx = 0.5*(
+                (del[n*N*N+ip*N+j] - del[n*N*N+im*N+j])/(2.*dx) +
+                (del[n*N*N+ip*N+jp] - del[n*N*N+im*N+jp])/(2.*dx)
+                );
+            grady = (del[n*N*N+i*N+jp] - del[n*N*N+i*N+j])/dy;
+            Fyp = -(
+                F_coeff_gradx[i][j][1]*gradx +
+                F_coeff_grady[i][j][1]*grady
+                );
+
+            /* lower x face */
+            gradx = (del[n*N*N+i*N+j] - del[n*N*N+im*N+j])/dx;
+            grady = 0.5*(
+                (del[n*N*N+i*N+jp] - del[n*N*N+i*N+jm])/(2.*dy) +
+                (del[n*N*N+im*N+jp] - del[n*N*N+im*N+jm])/(2.*dy)
+                );
+            Fxm = -(
+                F_coeff_gradx[i][j][2]*gradx +
+                F_coeff_grady[i][j][2]*grady
+                );
+
+            /* lower y face */
+            gradx = 0.5*(
+                (del[n*N*N+ip*N+j] - del[n*N*N+im*N+j])/(2.*dx) +
+                (del[n*N*N+ip*N+jm] - del[n*N*N+im*N+jm])/(2.*dx)
+                );
+            grady = (del[n*N*N+i*N+j] - del[n*N*N+i*N+jm])/dy;
+            Fym = -(
+                F_coeff_gradx[i][j][3]*gradx +
+                F_coeff_grady[i][j][3]*grady
+                );
+
+            lap[n*N*N + i*N + j] = -(Fxp - Fxm)/dx - (Fyp - Fym)/dy;
+        }
+    }
+}
+
 
 void evolve_diffusion(double del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
     double dt)
@@ -367,6 +588,19 @@ void evolve_noise(double del[N][N], double dt, double PARAM_EPS)
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         del[i][j] += del_noise[i][j];
+    }
+
+}
+
+void evolve_source(double del[N][N], double dt, double* source)
+{
+    int i,j;
+    int n = 0;
+    /* update del */
+    for(i=0;i<N;i++)
+    for(j=0;j<N;j++) {
+        del[i][j] += dt * source[n];
+        n++;
     }
 
 }

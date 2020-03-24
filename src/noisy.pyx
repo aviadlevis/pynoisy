@@ -13,6 +13,10 @@ cdef extern from "evolve.c":
                             double T[N][N], double *Kmax, double *Vmax, double PARAM_RAT,
                             double principal_angle_image[N][N], double advection_velocity_image[N][N][2],
                             double diffusion_coefficient_image[N][N], double correlation_time_image[N][N])
+    void get_diffusion_tensor_image(double* F_coeff_gradx, double PARAM_RAT, double* principal_angle_image,
+                                    double* diffusion_coefficient_image)
+    void get_laplacian_image(double* lap, double PARAM_RAT, double* principal_angle_image,
+                             double* diffusion_coefficient_image, double* frames)
     void evolve_diffusion(double dell[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], double dt)
     void linear_mc(double x1, double x2, double x3, double *lout, double *rout)
     void reconstruct_lr(double d0, double d1, double d2, double d3, double *d_left, double *d_right)
@@ -43,6 +47,10 @@ cdef extern from "main.c":
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image,
               double* output_video, bool verbose)
+    int adjoint_main(double PARAM_RAT, double tf,
+              double* principal_angle_image, double* advection_velocity_image,
+              double* diffusion_coefficient_image, double* correlation_time_image,
+              double* output_video, double* source, bool verbose)
     void xy_image(double x[N][N], double y[N][N])
 
 cdef extern from "image.c":
@@ -70,6 +78,21 @@ def run_main(PARAM_RAT, PARAM_EPS, evolution_length,
     cmain(PARAM_RAT, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
           &output_video[0,0,0], verbose)
+    return np.asarray(output_video)
+
+
+def run_adjoint(PARAM_RAT, evolution_length,
+             np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
+             np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
+             np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
+             np.ndarray[double, ndim=2, mode="c"] c_correlation_time_image,
+             np.ndarray[double, ndim=3, mode="c"] source,
+             verbose):
+    """TODO"""
+    cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
+    adjoint_main(PARAM_RAT, evolution_length, &c_principal_angle_image[0,0],
+          &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
+          &output_video[0,0,0], &source[0,0,0], verbose)
     return np.asarray(output_video)
 
 
@@ -116,8 +139,21 @@ def get_disk_envelope(PARAM_RCH):
     get_envelope_image(envelope_image, PARAM_RCH)
     return np.asarray(envelope_image)
 
+def get_diffusion_tensor(PARAM_RAT,
+                         np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
+                         np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image):
+
+    cdef np.ndarray[double, ndim=4, mode="c"] diffusion_tensor = np.zeros(shape=(N, N, 4, 2), dtype=np.float64)
+    get_diffusion_tensor_image(&diffusion_tensor[0,0,0,0], PARAM_RAT, &c_principal_angle_image[0,0], &c_diffusion_coefficient_image[0,0])
+    return np.asarray(diffusion_tensor)
 
 
-
-
+def get_laplacian(PARAM_RAT,
+                  np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
+                  np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
+                  np.ndarray[double, ndim=3, mode="c"] frames):
+    """TODO"""
+    cdef np.ndarray[double, ndim=3, mode="c"] lap = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
+    get_laplacian_image(&lap[0,0,0], PARAM_RAT, &c_principal_angle_image[0,0], &c_diffusion_coefficient_image[0,0], &frames[0,0,0])
+    return np.asarray(lap)
 

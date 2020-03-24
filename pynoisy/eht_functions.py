@@ -149,7 +149,7 @@ def export_movie(im_List, out, fps=10, dpi=120, scale='linear', cbar_unit = 'Jy'
     ani.save(out,writer=writer,dpi=dpi)
     plt.close(fig)
 
-def generate_observations(movie, obs_sgra, output_path):
+def generate_observations(movie, obs_sgra, output_path='.'):
     """Generates sgra-like obeservations from the movie
 
     Args:
