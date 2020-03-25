@@ -222,7 +222,7 @@ void get_envelope_image(double envelope_image[N][N], double PARAM_RCH)
 }
 
 /* noise model */
-void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
+void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, int seed)
 {
 
     int i,j;
@@ -233,7 +233,7 @@ void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
 #if 1
     if(first_call) {
         r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
-        gsl_rng_set(r, 0);
+        gsl_rng_set(r, seed);
         first_call = 0;
     }
 

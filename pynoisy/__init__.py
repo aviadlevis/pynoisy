@@ -2,16 +2,10 @@
 TODO: Some documentation and general description goes here.
 """
 from enum import Enum
-import core
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib import animation
+import skimage.transform
 import pickle
 import os
-import skimage.transform
-from scipy import interpolate
-from matplotlib import animation
-import ehtim as eh
 
 class RotationDirection(Enum):
     clockwise = -1.0
@@ -48,525 +42,6 @@ class Image(object):
     @property
     def r(self):
         return self._r
-
-
-class Advection(Image):
-    """TODO"""
-    def __init__(self, velocity=None):
-        super().__init__()
-        self._v = np.empty(shape=self.image_size + [2], dtype=np.float64) if velocity is None else np.array(velocity, dtype=np.float64, order='C')
-
-    def __add__(self, other):
-        advection = Advection(velocity=self.v + other.v)
-        return advection
-
-    def __sub__(self, other):
-        advection = Advection(velocity=self.v - other.v)
-        return advection
-
-    def __mul__(self, other):
-        assert np.isscalar(other), 'Only scalar * advection multiplication is supported'
-        advection = Advection(velocity=self.v * other)
-        return advection
-
-    def __neg__(self):
-        advection = Advection(velocity=-self.v)
-        return advection
-
-    def plot_velocity(self, downscale_factor=0.125):
-        """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
-        scaled_v = skimage.transform.resize(self.v, new_shape)
-        scaled_x = skimage.transform.resize(self.x, new_shape)
-        scaled_y = skimage.transform.resize(self.y, new_shape)
-        plt.quiver(scaled_x, scaled_y, scaled_v[..., 0], scaled_v[..., 1])
-        plt.title('Disk velocity field (Kepler induced)', fontsize=18)
-        plt.xlim([-0.5, 0.5])
-        plt.ylim([-0.5, 0.5])
-
-    @property
-    def v(self):
-        return self._v
-
-    @property
-    def vx(self):
-        return self._v[...,0]
-
-    @property
-    def vy(self):
-        return self._v[...,0]
-
-
-class DiskAdvection(Advection):
-    """
-    TODO
-
-    Parameters
-    ----------
-    direction: RotationDirection, , default=clockwise
-        clockwise or counter clockwise
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
-    """
-    def __init__(self, direction=RotationDirection.clockwise, scaling_radius=0.2):
-        super().__init__()
-        self._v = core.get_disk_velocity(direction.value, scaling_radius)
-
-    def __add__(self, other):
-        """TODO"""
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
-        xx, yy = np.meshgrid(x, y, indexing='ij')
-        v1x = interpolate.interp2d(self.x[:, 0], self.y[0], self.v[...,0], bounds_error=False, fill_value=0.0)
-        v2x = interpolate.interp2d(other.x[:, 0], other.y[0], other.v[...,0], bounds_error=False, fill_value=0.0)
-        v1y = interpolate.interp2d(self.x[:, 0], self.y[0], self.v[...,1], bounds_error=False, fill_value=0.0)
-        v2y = interpolate.interp2d(other.x[:, 0], other.y[0], other.v[...,1], bounds_error=False, fill_value=0.0)
-        velocity = np.stack(((v1x(x, y) + v2x(x, y)) / 2.0, (v1y(x, y) + v2y(x, y)) / 2.0), axis=-1)
-        advection = Advection(velocity)
-        advection._x = np.array(xx, dtype=np.float64, order='C')
-        advection._y = np.array(yy, dtype=np.float64, order='C')
-        return advection
-
-
-class Diffusion(Image):
-    """TODO"""
-    def __init__(self, principle_angle=None, diffusion_coefficient=None, correlation_time=None, tensor_ratio=1.0):
-        super().__init__()
-        self._principle_angle = np.empty(shape=self.image_size, dtype=np.float64)  if principle_angle is None else np.array(principle_angle, dtype=np.float64, order='C')
-        self._diffusion_coefficient = np.empty(shape=self.image_size, dtype=np.float64) if diffusion_coefficient is None else np.array(diffusion_coefficient, dtype=np.float64, order='C')
-        self._correlation_time = np.empty(shape=self.image_size, dtype=np.float64) if correlation_time is None else np.array(correlation_time, dtype=np.float64, order='C')
-        self._correlation_length = None
-        self._tensor_ratio = tensor_ratio
-
-    def set_correlation_length(self, correlation_length):
-        """TODO"""
-        self._correlation_length = correlation_length
-        self._diffusion_coefficient = 2.0 * correlation_length**2 / self._correlation_time
-        print('Updating diffusion coefficient according to correlation length and time: D = 2.0 * l**2 / t')
-
-    def get_tensor(self):
-        return core.get_diffusion_tensor(self.tensor_ratio, self.principle_angle, self.diffusion_coefficient)
-
-    def get_laplacian(self, frames, advection_image):
-        lap = core.get_laplacian(
-            self.tensor_ratio,
-            self.principle_angle,
-            self.diffusion_coefficient,
-            np.array(advection_image, dtype=np.float64, order='C'),
-            self.correlation_time,
-            np.array(frames, dtype=np.float64, order='C')
-        )
-        return lap
-
-    def __add__(self, other):
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
-        xx, yy = np.meshgrid(x, y, indexing='ij')
-
-        dc1 = interpolate.interp2d(self.x[:,0], self.y[0], self.diffusion_coefficient, bounds_error=False, fill_value = 0.0)
-        dc2 = interpolate.interp2d(other.x[:,0], other.y[0], other.diffusion_coefficient, bounds_error=False, fill_value = 0.0)
-        ct1 = interpolate.interp2d(self.x[:, 0], self.y[0], self.correlation_time, bounds_error=False,  fill_value=0.0)
-        ct2 = interpolate.interp2d(other.x[:, 0], other.y[0], other.correlation_time, bounds_error=False, fill_value=0.0)
-        cos1 = interpolate.interp2d(self.x[:, 0], self.y[0], np.cos(self.principle_angle), bounds_error=False, fill_value=0.0)
-        cos2 = interpolate.interp2d(other.x[:, 0], other.y[0], np.cos(other.principle_angle), bounds_error=False, fill_value=0.0)
-        sin1 = interpolate.interp2d(self.x[:, 0], self.y[0], np.sin(self.principle_angle), bounds_error=False, fill_value=0.0)
-        sin2 = interpolate.interp2d(other.x[:, 0], other.y[0], np.sin(other.principle_angle), bounds_error=False, fill_value=0.0)
-
-        diffusion_coefficient = dc1(x, y) + dc2(x, y)
-        cos = (dc1(x, y) * cos1(x, y) + dc2(x, y) * cos2(x, y)) / (diffusion_coefficient + 1e-8)
-        sin = (dc1(x, y) * sin1(x, y) + dc2(x, y) * sin2(x, y)) / (diffusion_coefficient + 1e-8)
-        principle_angle = np.arctan2(sin, cos)
-        correlation_time = ct1(x, y) + ct2(x, y)
-        diffusion = Diffusion(principle_angle, diffusion_coefficient, correlation_time, self.tensor_ratio)
-        diffusion._x = np.array(xx, dtype=np.float64, order='C')
-        diffusion._y = np.array(yy, dtype=np.float64, order='C')
-
-        return diffusion
-
-    def __setitem__(self, indices, data):
-        self._principle_angle[indices] = data.principle_angle[indices]
-        self._diffusion_coefficient[indices] = data.diffusion_coefficient[indices]
-        self._correlation_time[indices] = data.correlation_time[indices]
-        if self.correlation_length is not None and data.correlation_length is not None:
-            self._correlation_length[indices] = data.correlation_length[indices]
-
-    def plot_principal_axis(self, downscale_factor=0.125):
-        """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
-        vx = skimage.transform.resize(np.cos(self.principle_angle), new_shape)
-        vy = skimage.transform.resize(np.sin(self.principle_angle), new_shape)
-        scaled_x = skimage.transform.resize(self.x, new_shape)
-        scaled_y = skimage.transform.resize(self.y, new_shape)
-        plt.quiver(scaled_x, scaled_y, vx, vy)
-        plt.title('Diffusion tensor (primary)', fontsize=18)
-
-    def plot_secondary_axis(self, downscale_factor=0.125):
-        """TODO"""
-        new_shape = (downscale_factor * np.array(self.image_size)).astype(int)
-        vx = skimage.transform.resize(-np.sin(self.principle_angle), new_shape)
-        vy = skimage.transform.resize(np.cos(self.principle_angle), new_shape)
-        scaled_x = skimage.transform.resize(self.x, new_shape)
-        scaled_y = skimage.transform.resize(self.y, new_shape)
-        plt.quiver(scaled_x, scaled_y, vx, vy)
-        plt.title('Diffusion tensor (secondary)', fontsize=18)
-
-    def imshow_correlation_time(self):
-        """TODO"""
-        im = plt.imshow(self.correlation_time)
-        plt.title('Correlation time', fontsize=18)
-        divider = make_axes_locatable(plt.gca())
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        plt.colorbar(im, cax=cax)
-
-    def imshow_correlation_length(self):
-        """TODO"""
-        if self.correlation_length is None:
-            print('Correlation length is not set')
-        else:
-            im = plt.imshow(self.correlation_length)
-            plt.title('Correlation length', fontsize=18)
-            divider = make_axes_locatable(plt.gca())
-            cax = divider.append_axes("right", size="5%", pad=0.1)
-            plt.colorbar(im, cax=cax)
-
-    def imshow_diffusion_coefficient(self):
-        """TODO"""
-        im = plt.imshow(self.diffusion_coefficient)
-        plt.title('Diffusion coefficient (primary axis)', fontsize=18)
-        divider = make_axes_locatable(plt.gca())
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        plt.colorbar(im, cax=cax)
-
-    @property
-    def tensor_ratio(self):
-        return self._tensor_ratio
-
-    @property
-    def principle_angle(self):
-        return self._principle_angle
-
-    @property
-    def diffusion_coefficient(self):
-        return self._diffusion_coefficient
-
-    @property
-    def correlation_time(self):
-        return self._correlation_time
-
-    @property
-    def correlation_length(self):
-        return self._correlation_length
-
-
-class RingDiffusion(Diffusion):
-    """
-    TODO
-
-    Parameters
-    ----------
-    opening_angle: float, default= pi/3
-        This angle defines the opening angle of spirals with respect to the local radius
-    tau: float, default=1.0
-        product of correlation time and local Keplerian frequency
-    lam: float, default=0.5
-        ratio of correlation length to local radius
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
-    tensor_ratio: float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    """
-    def __init__(self,
-                 opening_angle=np.pi/3.0,
-                 tau=1.0,
-                 lam=0.5,
-                 scaling_radius=0.2,
-                 tensor_ratio=0.1):
-        super().__init__()
-        self._opening_angle = opening_angle
-        self._tau = tau
-        self._lam = lam
-        self._scaling_radius = scaling_radius
-        self._tensor_ratio = tensor_ratio
-        self._principle_angle = core.get_disk_angle(opening_angle)
-        self._correlation_time = core.get_disk_correlation_time(tau, scaling_radius)
-        self._diffusion_coefficient = core.get_disk_diffusion_coefficient(tau, lam, scaling_radius)
-        self._correlation_length =  core.get_disk_correlation_length(scaling_radius, lam)
-
-    @property
-    def opening_angle(self):
-        return self._opening_angle
-
-    @property
-    def tau(self):
-        return self._tau
-
-    @property
-    def lam(self):
-        return self._lam
-
-    @property
-    def scaling_radius(self):
-        return self._scaling_radius
-
-
-class DiskDiffusion(Diffusion):
-    """
-    TODO
-
-    Parameters
-    ----------
-    tau: float, default=1.0
-        product of correlation time and local Keplerian frequency
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
-    tensor_ratio: float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    """
-    def __init__(self, direction=RotationDirection.clockwise, tau=1.0, scaling_radius=0.2, tensor_ratio=0.1):
-        super().__init__()
-        self._principle_angle = core.get_disk_angle(-direction.value * np.pi/2)
-        self._correlation_time = core.get_disk_correlation_time(tau, scaling_radius)
-        self._diffusion_coefficient = np.exp(-0.5*(self.r/scaling_radius)**2)
-        self._tensor_ratio = tensor_ratio
-
-
-class Envelope(Image):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The equation for each field is: image = exp(-amplitude*del)*envelope
-    """
-    def __init__(self, data=None):
-        super().__init__()
-        self._data = np.ones(shape=self.image_size, dtype=np.float64, order='C') if data is None else data
-
-    def __add__(self, other):
-        x = np.linspace(min(self.x.min(), other.x.min()), max(self.x.max(), other.x.max()), self.image_size[0])
-        y = np.linspace(min(self.y.min(), other.y.min()), max(self.y.max(), other.y.max()), self.image_size[1])
-        xx, yy = np.meshgrid(x, y, indexing='ij')
-        f1 = interpolate.interp2d(self.x[:,0], self.y[0], self.data, bounds_error=False, fill_value = 0.0)
-        f2 = interpolate.interp2d(other.x[:,0], other.y[0], other.data, bounds_error=False, fill_value = 0.0)
-        envelope = Envelope(np.array(f1(x, y) + f2(x, y), dtype=np.float64, order='C'))
-        envelope._x = xx
-        envelope._y = yy
-        return envelope
-
-    def __mul__(self, other):
-        return Envelope(np.array(self.data * other, dtype=np.float64, order='C'))
-
-
-    def __truediv__(self, other):
-        return Envelope(np.array(self.data / other, dtype=np.float64, order='C'))
-
-    def load_fits(self, path):
-        image = eh.image.load_fits(path)
-        image = image.regrid_image(image.fovx(), self.image_size[0])
-        return Envelope(data=image.imarr())
-
-    def apply(self, movie, amplitude=0.05):
-        """
-        Parameters
-        ----------
-        amplitude: float, default = 0.05
-            strength of perturbation; image = exp(-amplitude*del)*envelope
-        """
-        frames = self.data * np.exp(-amplitude * movie.frames)
-        return Movie(frames, movie.duration)
-
-    def imshow(self):
-        """TODO"""
-        im = plt.imshow(self.data)
-        plt.title('Envelope function', fontsize=18)
-        divider = make_axes_locatable(plt.gca())
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        plt.colorbar(im, cax=cax)
-
-
-    @property
-    def data(self):
-        return self._data
-
-
-class RingEnvelope(Envelope):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The equation for each field is: image = exp(-amplitude*del)*envelope
-
-    Parameters
-    ----------
-    amplitude: float, default = 0.05
-        strength of perturbation; image = exp(-amplitude*del)*envelope
-    """
-    def __init__(self, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
-                 photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, amplitude=0.05):
-        super().__init__(amplitude)
-
-        zone0_radius = inner_radius
-        zone1_radius = inner_radius + photon_ring_thickness
-
-        decay1 = photon_ring_decay
-        decay2 = inner_decay
-        decay3 = outer_decay
-
-        zone0 = np.exp(-1.0 / ((self.r + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
-        zone0[self.r > zone0_radius] = 0
-
-        zone1 = (photon_ring_contrast + np.exp(-decay1 * (self.r - zone0_radius))) * np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
-        zone1[self.r <= zone0_radius] = 0
-        zone1[self.r > zone1_radius] = 0
-
-        zone2 = np.exp(-decay2 * (self.r - zone1_radius)) * np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)  * \
-                (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
-        zone2[self.r <= zone1_radius] = 0
-
-        data = zone0 + zone1 + zone2
-
-        if outer_radius < 1.0:
-            data[self.r > outer_radius] = 0
-            zone3 = np.exp(-decay3 * (self.r - outer_radius)) * np.exp(-decay2 * (outer_radius - zone1_radius)) * \
-                    np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)  * \
-                    (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
-            zone3[self.r <= outer_radius] = 0
-            data += zone3
-
-        self._data = np.array(data, dtype=np.float64, order='C')
-
-
-class NoisyDiskEnvelope(Envelope):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The equation for each field is: image = exp(-amplitude*del)*envelope
-    The disk envelope function is a specific envelope defined by the src/model_disk.c
-
-    Parameters
-    ----------
-    amplitude: float, default = 0.05
-        strength of perturbation; image = exp(-amplitude*del)*envelope
-    scaling_radius: float, default=0.02
-        Scales the disk radius with respect to the whole image
-    """
-    def __init__(self, amplitude=0.05, scaling_radius=0.2):
-        super().__init__(amplitude)
-        self._data = core.get_disk_envelope(scaling_radius)
-
-
-class GaussianEnvelope(Envelope):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The equation for each field is: image = exp(-amplitude*del)*envelope
-
-    Parameters
-    ----------
-    amplitude: float, default = 0.05
-        strength of perturbation; image = exp(-amplitude*del)*envelope
-    """
-    def __init__(self, std=0.2, FWHM=None, amplitude=0.05):
-        super().__init__(amplitude)
-        std2FWHM = lambda std: std * np.sqrt(2 * np.log(2)) * 2 / np.sqrt(2)
-        FWHM2std = lambda gamma: gamma * np.sqrt(2) / (np.sqrt(2 * np.log(2)) * 2)
-
-        if FWHM is None:
-            self._std, self._FWHM = std, std2FWHM(std)
-        else:
-            self._std, self._FWHM = FWHM2std(FWHM), FWHM
-        data = np.exp(-(self.r / self.std) ** 2)
-        self._data = np.array(data, dtype=np.float64, order='C')
-
-    @property
-    def std(self):
-        return self._std
-
-    @property
-    def FWHM(self):
-        return self._FWHM
-
-
-class DiskEnvelope(Envelope):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The equation for each field is: image = exp(-amplitude*del)*envelope
-
-    Parameters
-    ----------
-    amplitude: float, default = 0.05
-        strength of perturbation; image = exp(-amplitude*del)*envelope
-    """
-    def __init__(self, radius=0.2, decay=20, amplitude=0.05):
-        super().__init__(amplitude)
-        data = np.ones_like(self.r, dtype=np.float64, order='C')
-        data[self.r >= .95 * radius] = 0
-        exponential_decay = np.exp(-decay * (self.r - .95 * radius))
-        data[self.r >= .95 * radius] = exponential_decay[self.r >= .95 * radius]
-        self._data = np.array(data, dtype=np.float64, order='C')
-
-
-    @property
-    def std(self):
-        return self._std
-
-    @property
-    def FWHM(self):
-        return self._FWHM
-
-
-class PDESolver(object):
-    """TODO"""
-    def __init__(self, advection=Advection(), diffusion=Diffusion(), forcing_strength=1.0):
-        self._forcing_strength = forcing_strength
-        self.set_advection(advection)
-        self.set_diffusion(diffusion)
-        self._num_frames = core.get_num_frames()
-
-    def set_advection(self, advection):
-        """TODO"""
-        self._advection = advection
-
-    def set_diffusion(self, diffusion):
-        """TODO"""
-        self._diffusion = diffusion
-
-    def run(self, evolution_length=0.1, verbose=True):
-        """TODO"""
-        frames = core.run_main(
-            self.diffusion.tensor_ratio,
-            self.forcing_strength,
-            evolution_length,
-            self.diffusion.principle_angle,
-            self.advection.v,
-            self.diffusion.diffusion_coefficient,
-            self.diffusion.correlation_time,
-            verbose
-        )
-        return Movie(frames, duration=evolution_length)
-
-    def run_adjoint(self, source, evolution_length=0.1, verbose=True):
-        """TODO"""
-        frames = core.run_adjoint(
-            self.diffusion.tensor_ratio,
-            evolution_length,
-            self.diffusion.principle_angle,
-            self.advection.v,
-            self.diffusion.diffusion_coefficient,
-            self.diffusion.correlation_time,
-            np.array(source, dtype=np.float64, order='C'),
-            verbose
-        )
-        return Movie(frames, duration=evolution_length)
-
-    @property
-    def num_frames(self):
-        return self._num_frames
-
-    @property
-    def forcing_strength(self):
-        return self._forcing_strength
-
-    @property
-    def advection(self):
-        return self._advection
-
-    @property
-    def diffusion(self):
-        return self._diffusion
 
 
 class Movie(object):
@@ -667,18 +142,47 @@ class Movie(object):
             return None
 
 
-class DynamicEnvelope(Movie):
-    """TODO"""
+class MovieSamples(Movie):
+    duplicate_single_frame = property()
 
-    def __init__(self, frames=None, duration=None):
-        super().__init__(frames, duration)
+    def __init__(self, movie_list=None):
+        duration = None
+        if movie_list is not None:
+            duration = [movie.duration for movie in movie_list]
+            assert duration.count(duration[0]) == len(duration), 'All movie durations should be identical'
+            duration = duration[0]
+        super().__init__(duration=duration)
+        self._movie_list = movie_list
+        self._frames = np.array([movie.frames for movie in movie_list])
 
-    def apply(self, movie, amplitude=0.05):
-        """
-        Parameters
-        ----------
-        amplitude: float, default = 0.05
-            strength of perturbation; image = exp(-amplitude*del)*envelope
-        """
-        frames = self.frames * np.exp(-amplitude * movie.frames)
-        return Movie(frames, movie.duration)
+    def __mul__(self, other):
+        movie_list = [super(MovieSamples, self).__mul__(movie) for movie in self.movie_list]
+        return MovieSamples(movie_list)
+
+    def __getitem__(self, item):
+        return self.movie_list[item]
+
+    def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
+        anim_list = [super(MovieSamples, self).get_animation(vmin, vmax, fps, output) for movie in self.movie_list]
+        return anim_list
+
+    def reverse_time(self):
+        movie_list = [super(MovieSamples, self).reverse_time(movie) for movie in self.movie_list]
+        return MovieSamples(movie_list)
+
+    def mean(self):
+        return Movie(self.frames.mean(axis=0), self.duration)
+
+    def std(self):
+        return Movie(self.frames.std(axis=0), self.duration)
+
+    @property
+    def movie_list(self):
+        return self._movie_list
+
+
+from pynoisy.diffusion import *
+from pynoisy.advection import *
+from pynoisy.envelope import *
+from pynoisy.forward import *
+from pynoisy.inverse import *

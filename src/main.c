@@ -32,7 +32,8 @@ int cmain(
     double* diffusion_coefficient_image,
     double* correlation_time_image,
     double* output_video,
-    bool verbose
+    bool verbose,
+    int seed
     )
 {
     static double _del[N][N];
@@ -45,7 +46,7 @@ int cmain(
         double dt);
     void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
     void evolve_decay(double _del[N][N], double T[N][N], double dt);
-    void evolve_noise(double del[N][N], double dt, double PARAM_EPS);
+    void evolve_noise(double del[N][N], double dt, double PARAM_EPS, int seed);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -130,7 +131,7 @@ int cmain(
     while(t < tf){
 
          /* operator split */
-        evolve_noise(_del, dt, PARAM_EPS);
+        evolve_noise(_del, dt, PARAM_EPS, seed);
         evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
         evolve_advection(_del, v, dt);
         evolve_decay(_del, T, dt);

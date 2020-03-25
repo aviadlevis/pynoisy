@@ -47,7 +47,7 @@ cdef extern from "main.c":
     int cmain(double PARAM_RAT, double PARAM_EPS, double tf,
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image,
-              double* output_video, bool verbose)
+              double* output_video, bool verbose, int seed)
     int adjoint_main(double PARAM_RAT, double tf,
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image,
@@ -73,12 +73,12 @@ def run_main(PARAM_RAT, PARAM_EPS, evolution_length,
              np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
              np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
              np.ndarray[double, ndim=2, mode="c"] c_correlation_time_image,
-             verbose):
+             verbose, seed=0):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
     cmain(PARAM_RAT, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
-          &output_video[0,0,0], verbose)
+          &output_video[0,0,0], verbose, seed)
     return np.asarray(output_video)
 
 
