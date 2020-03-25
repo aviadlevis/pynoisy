@@ -16,7 +16,8 @@ cdef extern from "evolve.c":
     void get_diffusion_tensor_image(double* F_coeff_gradx, double PARAM_RAT, double* principal_angle_image,
                                     double* diffusion_coefficient_image)
     void get_laplacian_image(double* lap, double PARAM_RAT, double* principal_angle_image,
-                             double* diffusion_coefficient_image, double* frames)
+                             double* diffusion_coefficient_image, double* advection_velocity_image,
+                             double* correlation_time_image, double* frames)
     void evolve_diffusion(double dell[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], double dt)
     void linear_mc(double x1, double x2, double x3, double *lout, double *rout)
     void reconstruct_lr(double d0, double d1, double d2, double d3, double *d_left, double *d_right)
@@ -151,9 +152,12 @@ def get_diffusion_tensor(PARAM_RAT,
 def get_laplacian(PARAM_RAT,
                   np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
                   np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
+                  np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
+                  np.ndarray[double, ndim=2, mode="c"] c_correlation_time_image,
                   np.ndarray[double, ndim=3, mode="c"] frames):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] lap = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
-    get_laplacian_image(&lap[0,0,0], PARAM_RAT, &c_principal_angle_image[0,0], &c_diffusion_coefficient_image[0,0], &frames[0,0,0])
+    get_laplacian_image(&lap[0,0,0], PARAM_RAT, &c_principal_angle_image[0,0], &c_diffusion_coefficient_image[0,0],
+                        &c_advection_velocity_image[0,0,0], &c_correlation_time_image[0,0], &frames[0,0,0])
     return np.asarray(lap)
 

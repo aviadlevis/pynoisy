@@ -147,11 +147,13 @@ class Diffusion(Image):
     def get_tensor(self):
         return core.get_diffusion_tensor(self.tensor_ratio, self.principle_angle, self.diffusion_coefficient)
 
-    def get_laplacian(self, frames):
+    def get_laplacian(self, frames, advection_image):
         lap = core.get_laplacian(
             self.tensor_ratio,
             self.principle_angle,
             self.diffusion_coefficient,
+            np.array(advection_image, dtype=np.float64, order='C'),
+            self.correlation_time,
             np.array(frames, dtype=np.float64, order='C')
         )
         return lap

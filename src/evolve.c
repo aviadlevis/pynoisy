@@ -296,20 +296,40 @@ void get_laplacian_image(
     double PARAM_RAT,
     double* principal_angle_image,
     double* diffusion_coefficient_image,
+    double* advection_velocity_image,
+    double* correlation_time_image,
     double* del)
 {
-    void grid_function_calc_F(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4], double PARAM_RAT,
-                              double* principal_angle_image, double* diffusion_coefficient_image);
+    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
+        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
+        double PARAM_RAT, double* principal_angle_image, double* advection_velocity_image,
+        double* diffusion_coefficient_image, double* correlation_time_image);
+
     double gradx,grady,Fxp,Fxm,Fyp,Fym;
-    double dx=PARAM_FOV/N;
-    double dy=PARAM_FOV/N;
     int i,j,ip,jp,im,jm,n;
 
-    for(n=0;n<NUM_IMAGES;n++) {
-        double F_coeff_gradx[N][N][4] = {{{0.}}};
-        double F_coeff_grady[N][N][4] = {{{0.}}};
-        grid_function_calc_F(F_coeff_gradx, F_coeff_grady, PARAM_RAT, principal_angle_image, diffusion_coefficient_image);
+    /* calculate some grid functions */
+    static double v[N][N][4][2];
+    double Kmax = 0.;
+    double Vmax = 0.;
+    static double T[N][N];
+    double F_coeff_gradx[N][N][4] = {{{0.}}};
+    double F_coeff_grady[N][N][4] = {{{0.}}};
+    double dx = PARAM_FOV/N;
+    double dy = PARAM_FOV/N;
 
+    grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
+        PARAM_RAT, principal_angle_image, advection_velocity_image,
+        diffusion_coefficient_image, correlation_time_image);
+
+    double d = fmin(dx,dy);
+    double cour = 0.45;
+    double dtdiff = cour*0.25*d*d/Kmax;
+    double dtadv = cour*0.5*d/Vmax;
+    double dt = fmin(dtdiff, dtadv);
+
+
+    for(n=0;n<NUM_IMAGES;n++) {
         for(i=0;i<N;i++)
         for(j=0;j<N;j++) {
             ip = (i+N+1)%N ;
@@ -363,7 +383,7 @@ void get_laplacian_image(
                 F_coeff_grady[i][j][3]*grady
                 );
 
-            lap[n*N*N + i*N + j] = -(Fxp - Fxm)/dx - (Fyp - Fym)/dy;
+            lap[n*N*N + i*N + j] = -(Fxp - Fxm)/dx - (Fyp - Fym)/dy ;
         }
     }
 }
@@ -443,6 +463,7 @@ void evolve_diffusion(double del[N][N], double F_coeff_gradx[N][N][4], double F_
         deldiff = -(Fxp - Fxm)/dx - (Fyp - Fym)/dy;
 
         ddel[i][j] = deldiff ;
+
 
     }
 }
