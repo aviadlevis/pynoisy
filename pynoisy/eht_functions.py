@@ -149,29 +149,30 @@ def export_movie(im_List, out, fps=10, dpi=120, scale='linear', cbar_unit = 'Jy'
     ani.save(out,writer=writer,dpi=dpi)
     plt.close(fig)
 
-def generate_observations(movie, obs_sgra, output_path='.'):
+def generate_observations(movie, obs_sgra, output_path='.', noise=True):
     """Generates sgra-like obeservations from the movie
 
     Args:
         movie (ehtim.Movie): a Movie object
         obs_sgra (observation): An Observation object with sgra observation parameters
         output_path (str): output path for caltable
+        noise (bool): False for no noise
 
     Returns:
         obs (observation): An Observation object with sgra-like observation of the input movie.
     """
-    add_th_noise = True  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
-    phasecal = False  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
-    ampcal = False  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
-    stabilize_scan_phase = True  # if true then add a single phase error for each scan to act similar to adhoc phasing
-    stabilize_scan_amp = True  # if true then add a single gain error at each scan
-    jones = True  # apply jones matrix for including noise in the measurements (including leakage)
+    add_th_noise = noise  # False if you *don't* want to add thermal error. If there are no sefds in obs_orig it will use the sigma for each data point
+    phasecal = not noise  # True if you don't want to add atmospheric phase error. if False then it adds random phases to simulate atmosphere
+    ampcal = not noise  # True if you don't want to add atmospheric amplitude error. if False then add random gain errors
+    stabilize_scan_phase = noise  # if true then add a single phase error for each scan to act similar to adhoc phasing
+    stabilize_scan_amp = noise  # if true then add a single gain error at each scan
+    jones = noise  # apply jones matrix for including noise in the measurements (including leakage)
     inv_jones = False  # no not invert the jones matrix
-    frcal = True  # True if you do not include effects of field rotation
-    dcal = False  # True if you do not include the effects of leakage
+    frcal = not noise  # True if you do not include effects of field rotation
+    dcal = not noise  # True if you do not include the effects of leakage
     dterm_offset = 0.05  # a random offset of the D terms is given at each site with this standard deviation away from 1
-    rlgaincal = True
-    neggains = True
+    rlgaincal = not noise
+    neggains = not noise
 
     # these gains are approximated from the EHT 2017 data
     # the standard deviation of the absolute gain of each telescope from a gain of 1
@@ -181,7 +182,7 @@ def generate_observations(movie, obs_sgra, output_path='.'):
     gainp = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15,
              'SR': 0.0}
 
-    obs = movie.observe_same(obs_sgra, add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
+    obs = movie.observe_same(obs_sgra, ttype='nfft', add_th_noise=add_th_noise, ampcal=ampcal, phasecal=phasecal,
                              stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
                              gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
                              dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,

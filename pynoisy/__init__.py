@@ -144,7 +144,7 @@ class Movie(object):
 
 class MovieSamples(Movie):
     duplicate_single_frame = property()
-
+    get_animation = property()
     def __init__(self, movie_list=None):
         duration = None
         if movie_list is not None:
@@ -161,10 +161,6 @@ class MovieSamples(Movie):
 
     def __getitem__(self, item):
         return self.movie_list[item]
-
-    def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
-        anim_list = [super(MovieSamples, self).get_animation(vmin, vmax, fps, output) for movie in self.movie_list]
-        return anim_list
 
     def reverse_time(self):
         movie_list = [super(MovieSamples, self).reverse_time(movie) for movie in self.movie_list]

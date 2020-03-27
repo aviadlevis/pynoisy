@@ -76,24 +76,13 @@ class SamplerPDESolver(PDESolver):
         super().__init__(advection, diffusion, forcing_strength)
         self._num_samples = num_samples
 
-    def run(self, evolution_length=0.1, n_jobs=1):
+    def run(self, evolution_length=0.1, n_jobs=1, verbose=True):
+        sample_range = tqdm(range(self.num_samples)) if verbose is True else range(self.num_samples)
         if n_jobs == 1:
-            movie_list = [super(SamplerPDESolver, self).run(evolution_length, verbose=False)
-                          for i in tqdm(range(self.num_samples))]
+            movie_list = [super(SamplerPDESolver, self).run(evolution_length, verbose=False) for i in sample_range]
         else:
             movie_list = Parallel(n_jobs=min(n_jobs, self.num_samples))(
-                delayed(super(SamplerPDESolver, self).run)(evolution_length, verbose=False, seed=i)
-                for i in tqdm(range(self.num_samples)))
-        return MovieSamples(movie_list)
-
-    def run_adjoint(self, source, evolution_length=0.1, n_jobs=1):
-        if n_jobs == 1:
-            movie_list = [super(SamplerPDESolver, self).run_adjoint(source, evolution_length, verbose=False)
-                          for i in tqdm(range(self.num_samples))]
-        else:
-            movie_list = Parallel(n_jobs=min(n_jobs, self.num_samples))(
-                delayed(super(SamplerPDESolver, self).run_adjoint)(source, evolution_length, verbose=False)
-                for i in tqdm(range(self.num_samples)))
+                delayed(super(SamplerPDESolver, self).run)(evolution_length, verbose=False, seed=i) for i in sample_range)
         return MovieSamples(movie_list)
 
     @property

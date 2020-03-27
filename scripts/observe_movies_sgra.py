@@ -27,6 +27,9 @@ def parse_arguments():
     parser.add_argument('--mp4',
                         action='store_true',
                         help='Save mp4 outputs')
+    parser.add_argument('--nonoise',
+                        action='store_true',
+                        help='No thermal noise')
     parser.add_argument('--n_jobs',
                         type=int,
                         default=1,
@@ -49,7 +52,8 @@ def observe(hdf5_path, obs_sgra, args):
     if args.mp4:
         ehtf.export_movie(movie.im_list(), fps=10, out=output_path + '.mp4', verbose=False)
 
-    obs = ehtf.generate_observations(movie, obs_sgra, output_path)
+    #movie.frames = movie.frames*2
+    obs = ehtf.generate_observations(movie, obs_sgra, output_path, not args.nonoise)
     obs.save_uvfits(output_path + '.uvfits')
 
 
