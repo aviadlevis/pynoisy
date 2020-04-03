@@ -597,13 +597,13 @@ void evolve_advection(double del[N][N], double v[N][N][4][2], double dt)
 
 }
 
-void evolve_noise(double del[N][N], double dt, double PARAM_EPS, int seed)
+void evolve_noise(double del[N][N], double dt, double PARAM_EPS, gsl_rng* r)
 {
     int i,j;
 	double del_noise[N][N];
-    void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, int seed);
+    void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, gsl_rng *r);
 
-    noise_model(del_noise, dt, PARAM_EPS, seed);
+    noise_model(del_noise, dt, PARAM_EPS, r);
 
     /* update del */
     for(i=0;i<N;i++)

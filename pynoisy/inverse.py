@@ -190,8 +190,7 @@ class Optimizer(object):
             synthetic_measurements = self.solver.run(
                 evolution_length=self.measurements.duration, n_jobs=self.n_jobs, verbose=False
             )
-            error = (synthetic_measurements.mean().frames - self.measurements.frames) / \
-                    synthetic_measurements.std().frames
+            error = (synthetic_measurements.frames - self.measurements.frames).mean(axis=0)
 
         elif isinstance(self.solver, PDESolver):
             synthetic_measurements = self.solver.run(

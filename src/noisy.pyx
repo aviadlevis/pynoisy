@@ -2,6 +2,7 @@ cimport numpy as np
 import numpy as np
 from cpython cimport array
 from libcpp cimport bool
+import os
 
 cdef extern from "noisy.h":
     enum: N

@@ -222,24 +222,15 @@ void get_envelope_image(double envelope_image[N][N], double PARAM_RCH)
 }
 
 /* noise model */
-void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, int seed)
+void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, gsl_rng* r)
 {
-
     int i,j;
-    static int first_call = 1;
-    static gsl_rng * r;
 
     /* white noise in space and time model */
 #if 1
-    if(first_call) {
-        r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
-        gsl_rng_set(r, seed);
-        first_call = 0;
-    }
-
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
-        del_noise[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r,1.0);
+        del_noise[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r, 1.0);
     }
 #endif
 
@@ -264,3 +255,4 @@ void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, int seed)
 #endif
 
 }
+

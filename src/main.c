@@ -46,7 +46,7 @@ int cmain(
         double dt);
     void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
     void evolve_decay(double _del[N][N], double T[N][N], double dt);
-    void evolve_noise(double del[N][N], double dt, double PARAM_EPS, int seed);
+    void evolve_noise(double del[N][N], double dt, double PARAM_EPS, gsl_rng* r);
 
     double dx = PARAM_FOV/N;
     double dy = PARAM_FOV/N;
@@ -93,9 +93,14 @@ int cmain(
     double sigsq = 0.1*0.1 ;
     double x,y;
     */
-    gsl_rng * r;
-    r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
-    gsl_rng_set(r, 0);
+
+    /* Initiialize rng */
+    gsl_rng* r;
+    r = gsl_rng_alloc(gsl_rng_mt19937);
+    gsl_rng_set(r, seed);
+    fprintf(stderr,"seed = %d \n", seed);
+
+
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
         /*
@@ -131,7 +136,7 @@ int cmain(
     while(t < tf){
 
          /* operator split */
-        evolve_noise(_del, dt, PARAM_EPS, seed);
+        evolve_noise(_del, dt, PARAM_EPS, r);
         evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
         evolve_advection(_del, v, dt);
         evolve_decay(_del, T, dt);
@@ -157,6 +162,10 @@ int cmain(
         nstep++;
         t += dt;
     }
+
+    /* Free GSL rng state */
+    gsl_rng_free(r);
+
     /*
     FILE *fp = fopen("noisy.out", "w");
     if(fp == NULL) exit(1);
@@ -236,7 +245,7 @@ int adjoint_main(
     double sigsq = 0.1*0.1 ;
     double x,y;
     */
-    gsl_rng * r;
+    gsl_rng* r;
     r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
     gsl_rng_set(r, 0);
     for(i=0;i<N;i++)

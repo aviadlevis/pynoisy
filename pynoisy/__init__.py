@@ -51,6 +51,7 @@ class Movie(object):
         self._frames = frames
         self._duration = duration
         self._image_size = core.get_image_size()
+        self._num_frames = core.get_num_frames()
 
     def __mul__(self, other):
         assert np.isscalar(other), 'Only scalar * Movie multiplication is supported'
@@ -132,7 +133,7 @@ class Movie(object):
 
     @property
     def num_frames(self):
-        return len(self._frames)
+        return self._num_frames
 
     @property
     def frame_duration(self):
