@@ -8,7 +8,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy import interpolate
 import ehtim as eh
 from pynoisy import Image, Movie
-
+import copy
 
 class Envelope(Image):
     """
@@ -49,8 +49,9 @@ class Envelope(Image):
         amplitude: float, default = 0.05
             strength of perturbation; image = exp(-amplitude*del)*envelope
         """
-        frames = self.data * np.exp(-amplitude * movie.frames)
-        return Movie(frames, movie.duration)
+        new_movie = copy.copy(movie)
+        new_movie.set_frames(self.data * np.exp(-amplitude * movie.frames))
+        return new_movie
 
     def imshow(self):
         """TODO"""
@@ -201,6 +202,6 @@ class DynamicEnvelope(Movie):
         amplitude: float, default = 0.05
             strength of perturbation; image = exp(-amplitude*del)*envelope
         """
-        frames = self.frames * np.exp(-amplitude * movie.frames)
-        return Movie(frames, movie.duration)
-
+        new_movie = copy.copy(movie)
+        new_movie.set_frames(self.frames * np.exp(-amplitude * movie.frames))
+        return new_movie

@@ -48,7 +48,7 @@ class Movie(object):
     """TODO"""
 
     def __init__(self, frames=None, duration=None):
-        self._frames = frames
+        self.set_frames(frames)
         self._duration = duration
         self._image_size = core.get_image_size()
         self._num_frames = core.get_num_frames()
@@ -57,6 +57,9 @@ class Movie(object):
         assert np.isscalar(other), 'Only scalar * Movie multiplication is supported'
         movie = Movie(frames=self.frames * other, duration=self.duration)
         return movie
+
+    def set_frames(self, frames):
+        self._frames = frames
 
     def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
         """TODO"""
@@ -147,14 +150,17 @@ class MovieSamples(Movie):
     duplicate_single_frame = property()
     get_animation = property()
     def __init__(self, movie_list=None):
+        self._movie_list = movie_list
+        self._num_samples = len(movie_list)
         duration = None
         if movie_list is not None:
             duration = [movie.duration for movie in movie_list]
             assert duration.count(duration[0]) == len(duration), 'All movie durations should be identical'
             duration = duration[0]
-        super().__init__(duration=duration)
-        self._movie_list = movie_list
-        self._frames = np.array([movie.frames for movie in movie_list])
+        super().__init__(
+            frames=np.array([movie.frames for movie in movie_list]),duration=duration
+        )
+
 
     def __mul__(self, other):
         movie_list = [super(MovieSamples, self).__mul__(movie) for movie in self.movie_list]
@@ -162,6 +168,10 @@ class MovieSamples(Movie):
 
     def __getitem__(self, item):
         return self.movie_list[item]
+
+    def set_frames(self, frames):
+        self._movie_list = [Movie(frames[i]) for i in range(self.num_samples)]
+        super().set_frames(frames)
 
     def reverse_time(self):
         movie_list = [super(MovieSamples, self).reverse_time(movie) for movie in self.movie_list]
@@ -177,6 +187,9 @@ class MovieSamples(Movie):
     def movie_list(self):
         return self._movie_list
 
+    @property
+    def num_samples(self):
+        return self._num_samples
 
 from pynoisy.diffusion import *
 from pynoisy.advection import *

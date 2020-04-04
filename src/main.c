@@ -98,8 +98,9 @@ int cmain(
     gsl_rng* r;
     r = gsl_rng_alloc(gsl_rng_mt19937);
     gsl_rng_set(r, seed);
-    fprintf(stderr,"seed = %d \n", seed);
-
+    if (verbose) {
+        fprintf(stderr,"seed = %d \n", seed);
+    }
 
     for(i=0;i<N;i++)
     for(j=0;j<N;j++) {
