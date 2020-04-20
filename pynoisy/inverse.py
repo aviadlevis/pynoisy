@@ -44,7 +44,7 @@ class Estimator(object):
 
 
 class RingDiffusionAngleEstimator(RingDiffusion, Estimator):
-    def __init__(self, ring_diffusion, dx=1e-2, min_bound=-np.pi/2, max_bound=np.pi/2):
+    def __init__(self, ring_diffusion, dx=1e-2, min_bound=-np.pi, max_bound=np.pi):
         super().__init__(ring_diffusion.opening_angle, ring_diffusion.tau, ring_diffusion.lam,
                          ring_diffusion.scaling_radius,ring_diffusion.tensor_ratio)
         self._dx = dx
@@ -56,7 +56,7 @@ class RingDiffusionAngleEstimator(RingDiffusion, Estimator):
         diffusion_f = RingDiffusion(self.opening_angle + self.dx, self.tau, self.lam, self.scaling_radius, self.tensor_ratio)
         jacobian_source = (diffusion_f.get_laplacian(forward, advection.v) -
                            diffusion.get_laplacian(forward, advection.v)) / self.dx
-        jacobian_source = np.flip(jacobian_source, axis=0)
+        jacobian_source =jacobian_source
         gradient = np.mean(jacobian_source * backprop)
         return gradient
 
@@ -116,6 +116,7 @@ class Optimizer(object):
         self._solver = None
         self._adjoint_solver = None
         self._measurements = None
+        self._num_pixels = None
         self._writer = None
         self._iteration = 0
         self._loss = None
@@ -132,6 +133,7 @@ class Optimizer(object):
             A Movie object storing measured images
         """
         self._measurements = measurements
+        self._num_pixels = measurements.frames.size
 
     def set_solver(self, solver):
         """
@@ -164,7 +166,7 @@ class Optimizer(object):
 
     def objective_fun(self):
         """
-        The objective function (cost) and gradient at the current state.
+        The objective function (costF) and gradient at the current state.
 
         Returns
         -------
@@ -177,13 +179,30 @@ class Optimizer(object):
         -----
         This function also saves the current synthetic images for visualization purpose
         """
-        error = self.forward_pass()
-        self._loss = np.abs(error).mean()
+        error = self.compute_krylov_error(degree=8)
+        self._loss = np.mean(np.abs(error))
         backprop = self.adjoint_pass(error)
         gradients = [estimator.get_gradient(
             backprop.frames, self.measurements.frames, self.solver.diffusion, self.solver.advection)
             for estimator in self.estimators.values()]
         return self.loss, gradients
+
+    def get_krylov_matrix(self, degree):
+        b_normalized = self.measurements.frames / np.linalg.norm(self.measurements.frames)
+        k_matrix = []
+        for i in range(degree):
+            b = self.solver.run_adjoint(source=b_normalized, verbose=False)
+            b_normalized = b.frames / np.linalg.norm(b.frames)
+            k_matrix.append(b_normalized.ravel())
+        return np.array(k_matrix)
+
+    def compute_krylov_error(self, degree=8):
+        k_matrix = self.get_krylov_matrix(degree)
+        result = np.linalg.lstsq(k_matrix.T, self.measurements.frames.ravel(), rcond=None)
+        coefs, residual = result[0], result[1]
+        rec = np.dot(coefs.T, k_matrix).reshape(self.measurements.num_frames, *self.measurements.image_size)
+        error = rec - self.measurements.frames
+        return error
 
     def forward_pass(self):
         if isinstance(self.solver, SamplerPDESolver):
@@ -327,6 +346,10 @@ class Optimizer(object):
         return self._measurements
 
     @property
+    def num_pixels(self):
+        return self._num_pixels
+
+    @property
     def num_parameters(self):
         return self._num_parameters
 
@@ -367,7 +390,7 @@ class LBFGSbOptimizer(Optimizer):
 
     """
     def __init__(self, options={'maxiter': 100, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}, n_jobs=1):
-        super(self, LBFGSbOptimizer).__init__(n_jobs)
+        super(LBFGSbOptimizer, self).__init__(n_jobs)
         self._options = options
 
     def callback(self, state):
@@ -399,6 +422,7 @@ class LBFGSbOptimizer(Optimizer):
         """
         self.set_state(state)
         loss, gradient = super(LBFGSbOptimizer, self).objective_fun()
+        # print('Iter: {}     Angle: {}       Loss:{}       grad:{}'.format(self.iteration, state, loss, gradient))
         return np.array(loss), np.array(gradient)
 
     def minimize(self):
@@ -411,7 +435,7 @@ class LBFGSbOptimizer(Optimizer):
                           method='L-BFGS-B',
                           jac=True,
                           bounds=self.get_bounds(),
-                          options=self.options,
+                          options=self._options,
                           callback=self.callback)
         return result
 

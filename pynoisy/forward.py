@@ -21,7 +21,7 @@ class PDESolver(object):
 
     def reseed(self, seed=None):
         self._seed = np.random.randint(0, 32767) if seed is None else seed
-        print('Setting solver seed to: {}'.format(self.seed))
+        print('Setting solver seed to: {}'.format(self.seed), end='\r')
 
     def set_advection(self, advection):
         """TODO"""
