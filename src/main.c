@@ -133,7 +133,6 @@ int main_asymmetric(
     double rms = 0.;
     double t = 0.;
     double tl = Dtl;
-    tf += Dtl;
     while(t < tf){
 
          /* operator split */
@@ -260,7 +259,6 @@ int main_symmetric(
     double rms = 0.;
     double t = 0.;
     double tl = Dtl;
-    tf += Dtl;
     while(t < tf){
 
          /* operator split */

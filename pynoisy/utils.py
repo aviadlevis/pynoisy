@@ -42,7 +42,7 @@ def compare_movie_frames(frames1, frames2):
             ax.set_title(title)
             cbar.mappable.set_clim([img.min(), img.max()])
 
-    num_frames = min(frames1.sizes['t'], frames2.sizes['t'])
+    num_frames = min(frames1.t.size, frames2.t.size)
     interact(
         imshow_frame, i=(0, num_frames - 1),
         frames1=fixed(frames1), frames2=fixed(frames2), axes=fixed(axes), cbars=fixed(cbars)
@@ -62,17 +62,6 @@ class noisy_methods(object):
             self._obj.diffusion_coefficient.data
         )
         return tensor
-
-    def get_laplacian(self, frames, advection):
-        laplacian = core.get_laplacian(
-            self._obj.attrs['tensor_ratio'],
-            self._obj.principle_angle.data,
-            self._obj.diffusion_coefficient.data,
-            np.array(advection.data, dtype=np.float64, order='C'),
-            self._obj.correlation_time.data,
-            np.array(frames, dtype=np.float64, order='C')
-        )
-        return laplacian
 
     def plot_principal_axis(self, downscale_factor=8):
         """TODO"""
