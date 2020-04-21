@@ -20,5 +20,11 @@ setup(
     version='1.0',
     packages = setuptools.find_packages(),
     include_dirs=[numpy.get_include()],
+    install_requires=["numpy",
+                      "scipy",
+                      "matplotlib",
+                      "pandas",
+                      "xarray",
+                      "future"],
     ext_modules=cythonize(extensions)
 )

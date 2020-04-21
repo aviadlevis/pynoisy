@@ -45,11 +45,11 @@ cdef extern from "model_disk.c":
     void noise_model(double del_noise[N][N], double dt, double PARAM_EPS)
 
 cdef extern from "main.c":
-    int cmain(double PARAM_RAT, double PARAM_EPS, double tf,
+    int main_asymmetric(double PARAM_RAT, double PARAM_EPS, double tf,
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image,
               double* output_video, bool verbose, int seed)
-    int adjoint_main(double PARAM_RAT, double tf,
+    int main_symmetric(double PARAM_RAT, double tf,
               double* principal_angle_image, double* advection_velocity_image,
               double* diffusion_coefficient_image, double* correlation_time_image,
               double* output_video, double* source, bool verbose)
@@ -69,7 +69,7 @@ def get_num_frames():
     """TODO"""
     return NUM_IMAGES
 
-def run_main(PARAM_RAT, PARAM_EPS, evolution_length,
+def run_asymmetric(PARAM_RAT, PARAM_EPS, evolution_length,
              np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
              np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
              np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
@@ -77,13 +77,13 @@ def run_main(PARAM_RAT, PARAM_EPS, evolution_length,
              verbose, seed=0):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
-    cmain(PARAM_RAT, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
+    main_asymmetric(PARAM_RAT, PARAM_EPS, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
           &output_video[0,0,0], verbose, seed)
     return np.asarray(output_video)
 
 
-def run_adjoint(PARAM_RAT, evolution_length,
+def run_symmetric(PARAM_RAT, evolution_length,
              np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
              np.ndarray[double, ndim=3, mode="c"] c_advection_velocity_image,
              np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,
@@ -92,7 +92,7 @@ def run_adjoint(PARAM_RAT, evolution_length,
              verbose):
     """TODO"""
     cdef np.ndarray[double, ndim=3, mode="c"] output_video = np.zeros(shape=(NUM_IMAGES, N, N), dtype=np.float64)
-    adjoint_main(PARAM_RAT, evolution_length, &c_principal_angle_image[0,0],
+    main_symmetric(PARAM_RAT, evolution_length, &c_principal_angle_image[0,0],
           &c_advection_velocity_image[0,0,0], &c_diffusion_coefficient_image[0,0], &c_correlation_time_image[0,0],
           &output_video[0,0,0], &source[0,0,0], verbose)
     return np.asarray(output_video)
@@ -133,7 +133,8 @@ def get_disk_velocity(direction, PARAM_RCH):
     """TODO"""
     cdef double velocity[N][N][2]
     get_advection_velocity_image(velocity, direction, PARAM_RCH)
-    return np.asarray(velocity)
+    v = np.asarray(velocity)
+    return v[...,0], v[...,1]
 
 def get_disk_envelope(PARAM_RCH):
     """TODO"""

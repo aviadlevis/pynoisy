@@ -1,99 +1,128 @@
 """
 TODO: Some documentation and general description goes here.
 """
-from joblib import Parallel, delayed
-from tqdm import tqdm
+import xarray as xr
 import numpy as np
 import core
-from pynoisy.advection import Advection
-from pynoisy.diffusion import Diffusion
-from pynoisy import Movie, MovieSamples
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
-
-class PDESolver(object):
+class NoisySolver(object):
     """TODO"""
-    def __init__(self, advection=Advection(), diffusion=Diffusion(), forcing_strength=1.0, seed=None):
-        self._forcing_strength = forcing_strength
-        self.set_advection(advection)
-        self.set_diffusion(diffusion)
+
+    def __init__(self, advection, diffusion, forcing_strength=1.0, seed=None):
+        self._coefficients = xr.merge([advection, diffusion])
+        self._coefficients.attrs['advection'] = advection.attrs
+        self._coefficients.attrs['diffusion'] = diffusion.attrs
+        self._coefficients.attrs['forcing_strength'] = forcing_strength
         self.reseed(seed)
-        self._num_frames = core.get_num_frames()
+        self._coefficients.attrs['num_frames'] = core.get_num_frames()
+        self._diffusion_vars = list(diffusion.data_vars.keys())
+        self._advection_vars = list(advection.data_vars.keys())
 
     def reseed(self, seed=None):
-        self._seed = np.random.randint(0, 32767) if seed is None else seed
+        seed = np.random.randint(0, 32767) if seed is None else seed
+        self.coefficients.attrs['seed'] = seed
         print('Setting solver seed to: {}'.format(self.seed), end='\r')
 
     def set_advection(self, advection):
         """TODO"""
-        self._advection = advection
+        self._coefficients.update(advection)
+        self._coefficients.attrs['advection'] = advection.attrs
 
     def set_diffusion(self, diffusion):
         """TODO"""
-        self._diffusion = diffusion
+        self._coefficients.update(diffusion)
+        self._coefficients.attrs['diffusion'] = diffusion.attrs
 
-    def run(self, evolution_length=0.1, verbose=True, myid=0):
+    def run_asymmetric(self, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1):
         """TODO"""
-        frames = core.run_main(
-            self.diffusion.tensor_ratio,
-            self.forcing_strength,
-            evolution_length,
-            self.diffusion.principle_angle,
-            self.advection.v,
-            self.diffusion.diffusion_coefficient,
-            self.diffusion.correlation_time,
-            verbose,
-            self.seed + myid
-        )
-        return Movie(frames, duration=evolution_length)
+        sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
+        if n_jobs == 1:
+            pixels = [core.run_asymmetric(
+                self.coefficients.attrs['diffusion']['tensor_ratio'],
+                self.forcing_strength, evolution_length,
+                np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                np.array(self.v, dtype=np.float64, order='C'),
+                np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
+                np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                verbose, self.seed) for i in sample_range]
 
-    def run_adjoint(self, source, evolution_length=0.1, verbose=True):
+        else:
+            pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
+                delayed(core.run_asymmetric)(
+                    self.coefficients.attrs['diffusion']['tensor_ratio'],
+                    self.forcing_strength, evolution_length,
+                    np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                    np.array(self.v, dtype=np.float64, order='C'),
+                    np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
+                    np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                    False, self.seed + i) for i in sample_range)
+
+        movie = xr.DataArray(data=pixels,
+                             coords={'sample': range(num_samples),
+                                     't': np.linspace(0, evolution_length, self.num_frames),
+                                     'x': self.coefficients.x, 'y': self.coefficients.y},
+                             dims=['sample', 't', 'x', 'y'])
+        if num_samples == 1:
+            movie.attrs['seed'] = self.seed
+            movie = movie.squeeze('sample')
+        else:
+            movie.coords['seed'] = ('sample', self.seed + np.arange(num_samples))
+        return movie
+
+    def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1):
         """TODO"""
-        frames = core.run_adjoint(
-            self.diffusion.tensor_ratio,
-            evolution_length,
-            self.diffusion.principle_angle,
-            self.advection.v,
-            self.diffusion.diffusion_coefficient,
-            self.diffusion.correlation_time,
-            np.array(source, dtype=np.float64, order='C'),
-            verbose
+        source = np.random.randn(num_samples, self.num_frames, *core.get_image_size()) * self.forcing_strength \
+            if source is None else source
+
+        pixels = core.run_symmetric(
+            np.array(self.coefficients.attrs['diffusion']['tensor_ratio'], dtype=np.float64, order='C'),
+            evolution_length, np.array(self.coefficients.principle_angle),
+            np.array(self.v, dtype=np.float64, order='C'),
+            np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
+            np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+            np.array(source, dtype=np.float64, order='C'), verbose
         )
-        return Movie(frames, duration=evolution_length)
+        movie = xr.DataArray(data=pixels,
+                             coords={'t': np.linspace(0, evolution_length, self.num_frames),
+                                     'x': self.coefficients.x, 'y': self.coefficients.y},
+                             dims=['t', 'x', 'y'])
+        return movie
+
+    @property
+    def coefficients(self):
+        return self._coefficients
 
     @property
     def num_frames(self):
-        return self._num_frames
+        return self.coefficients.attrs['num_frames']
 
     @property
     def forcing_strength(self):
-        return self._forcing_strength
-
-    @property
-    def advection(self):
-        return self._advection
+        return self.coefficients.attrs['forcing_strength']
 
     @property
     def diffusion(self):
-        return self._diffusion
+        diffusion = self.coefficients[self._diffusion_vars]
+        diffusion.attrs = self.coefficients.attrs['diffusion']
+        return diffusion
+
+    @property
+    def advection(self):
+        advection = self.coefficients[self._advection_vars]
+        advection.attrs = self.coefficients.attrs['advection']
+        return advection
+
+    @property
+    def v(self):
+        return np.stack([self.coefficients.vx, self.coefficients.vy], axis=-1)
+
+    @property
+    def pixels(self):
+        return self.coefficients.pixels
 
     @property
     def seed(self):
-        return self._seed
+        return self.coefficients.attrs['seed']
 
-class SamplerPDESolver(PDESolver):
-    def __init__(self, advection=Advection(), diffusion=Diffusion(), forcing_strength=1.0, num_samples=1, seed=None):
-        super().__init__(advection, diffusion, forcing_strength, seed)
-        self._num_samples = num_samples
-
-    def run(self, evolution_length=0.1, n_jobs=1, verbose=True):
-        sample_range = tqdm(range(self.num_samples)) if verbose is True else range(self.num_samples)
-        if n_jobs == 1:
-            movie_list = [super(SamplerPDESolver, self).run(evolution_length, verbose=False) for i in sample_range]
-        else:
-            movie_list = Parallel(n_jobs=min(n_jobs, self.num_samples))(
-                delayed(super(SamplerPDESolver, self).run)(evolution_length, verbose=False, myid=i) for i in sample_range)
-        return MovieSamples(movie_list)
-
-    @property
-    def num_samples(self):
-        return self._num_samples

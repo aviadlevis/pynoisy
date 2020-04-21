@@ -23,7 +23,7 @@ CFG 22 Dec 2019
 
 #include "noisy.h"
 
-int cmain(
+int main_asymmetric(
     double PARAM_RAT,
     double PARAM_EPS,
     double tf,
@@ -177,7 +177,7 @@ int cmain(
 }
 
 
-int adjoint_main(
+int main_symmetric(
     double PARAM_RAT,
     double tf,
     double* principal_angle_image,
