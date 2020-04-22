@@ -120,7 +120,7 @@ def disk(radius=0.2, decay=20):
     data = np.ones_like(r)
     data[r >= .95 * radius] = 0
     exponential_decay = np.exp(-decay * (r - .95 * radius))
-    data[r >= .95 * radius] = exponential_decay[r >= .95 * radius]
+    data += exponential_decay.where(r >= .95 * radius).fillna(0.0)
 
     envelope = grid(data)
     new_attrs = {

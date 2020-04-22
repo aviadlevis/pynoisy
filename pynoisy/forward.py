@@ -88,8 +88,15 @@ class NoisySolver(object):
             source = np.random.randn(num_samples, self.num_frames, *core.get_image_size()) * self.forcing_strength
         else:
             source_attr = 'controlled (input)'
-            num_samples = source.sample.size
-            source = source.expand_dims('sample') if 'sample' not in source.dims else source
+            source_type = type(source)
+            if source_type == np.ndarray:
+                source = np.expand_dims(source, 0) if source.ndim==3 else source
+                num_samples = source.shape[0]
+            elif source_type == xr.DataArray:
+                num_samples = source.sample.size
+                source = source.expand_dims('sample') if 'sample' not in source.dims else source
+            else:
+                raise AttributeError('Source type ({}) not implemented'.format(source_type))
 
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
 
