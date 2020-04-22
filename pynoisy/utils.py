@@ -84,6 +84,17 @@ class noisy_methods(object):
         plt.quiver(x, y, v.vx, v.vy)
         plt.title('Velocity field', fontsize=18)
 
+    def plot_statistics(self):
+        """TODO"""
+        fig, ax = plt.subplots()
+        ax.set_title('{} samples statistics'.format(self._obj.num_samples), fontsize=16)
+        x_range = self._obj.coords[list(self._obj.coords.keys())[0]]
+        mean = self._obj['mean']
+        std = self._obj['std']
+        ax.plot(x_range, mean)
+        ax.fill_between(x_range, mean + std, mean - std, facecolor='blue', alpha=0.5)
+        ax.set_xlim([x_range.min(), x_range.max()])
+        
     def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
         """TODO"""
         num_frames, nx, ny = self._obj.sizes.values()
