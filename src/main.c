@@ -23,7 +23,7 @@ CFG 22 Dec 2019
 
 #include "noisy.h"
 
-int cmain(
+int main_asymmetric(
     double PARAM_RAT,
     double PARAM_EPS,
     double tf,
@@ -134,7 +134,7 @@ int cmain(
     double t = 0.;
     double tl = Dtl;
     tf += Dtl;
-    while(t < tf){
+    while(t <= tf){
 
          /* operator split */
         evolve_noise(_del, dt, PARAM_EPS, r);
@@ -177,7 +177,7 @@ int cmain(
 }
 
 
-int adjoint_main(
+int main_symmetric(
     double PARAM_RAT,
     double tf,
     double* principal_angle_image,
@@ -261,7 +261,7 @@ int adjoint_main(
     double t = 0.;
     double tl = Dtl;
     tf += Dtl;
-    while(t < tf){
+    while(t <= tf){
 
          /* operator split */
         evolve_source(_del, dt / Dtl, &source[n]);

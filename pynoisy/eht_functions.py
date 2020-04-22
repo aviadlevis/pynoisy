@@ -6,6 +6,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import pynoisy
 
 def load_sgra_obs(ehtim_home, uvfits_path):
     """Load SgrA observations.
@@ -189,3 +190,9 @@ def generate_observations(movie, obs_sgra, output_path='.', noise=True):
                              dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
 
     return obs
+
+
+def load_fits(path):
+    image = eh.image.load_fits(path)
+    image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
+    return pynoisy.envelope.grid(data=image.imarr())
