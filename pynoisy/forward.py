@@ -142,22 +142,22 @@ class NoisySolver(object):
 
     @property
     def num_frames(self):
-        return self.coefficients.attrs['num_frames']
+        return self.coefficients.num_frames
 
     @property
     def forcing_strength(self):
-        return self.coefficients.attrs['forcing_strength']
+        return self.coefficients.forcing_strength
 
     @property
     def diffusion(self):
         diffusion = self.coefficients[self._diffusion_vars]
-        diffusion.attrs = self.coefficients.attrs['diffusion']
+        diffusion.attrs = self.coefficients.diffusion
         return diffusion
 
     @property
     def advection(self):
         advection = self.coefficients[self._advection_vars]
-        advection.attrs = self.coefficients.attrs['advection']
+        advection.attrs = self.coefficients.advection
         return advection
 
     @property
@@ -170,5 +170,5 @@ class NoisySolver(object):
 
     @property
     def seed(self):
-        return self.coefficients.attrs['seed']
+        return self.coefficients.seed
 
