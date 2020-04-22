@@ -133,7 +133,8 @@ int main_asymmetric(
     double rms = 0.;
     double t = 0.;
     double tl = Dtl;
-    while(t < tf){
+    tf += Dtl;
+    while(t <= tf){
 
          /* operator split */
         evolve_noise(_del, dt, PARAM_EPS, r);
@@ -259,7 +260,8 @@ int main_symmetric(
     double rms = 0.;
     double t = 0.;
     double tl = Dtl;
-    while(t < tf){
+    tf += Dtl;
+    while(t <= tf){
 
          /* operator split */
         evolve_source(_del, dt / Dtl, &source[n]);

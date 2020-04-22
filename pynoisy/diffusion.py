@@ -44,7 +44,7 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
     diffusion = grid(
         principle_angle=core.get_disk_angle(opening_angle),
         correlation_time=core.get_disk_correlation_time(tau, scaling_radius),
-        correlation_length=core.get_disk_diffusion_coefficient(tau, lam, scaling_radius),
+        correlation_length=core.get_disk_correlation_length(scaling_radius, lam),
         tensor_ratio=tensor_ratio
     )
     new_attrs = {
