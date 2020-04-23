@@ -134,7 +134,7 @@ int main_asymmetric(
     double t = 0.;
     double tl = Dtl;
     tf += Dtl;
-    while(t <= tf){
+    while(t < tf){
 
          /* operator split */
         evolve_noise(_del, dt, PARAM_EPS, r);
@@ -260,7 +260,6 @@ int main_symmetric(
     double rms = 0.;
     double t = 0.;
     double tl = Dtl;
-    tf += Dtl;
     while(t <= tf){
 
          /* operator split */
@@ -290,6 +289,24 @@ int main_symmetric(
         nstep++;
         t += dt;
     }
+
+    if(t > tl) {
+        /* check rms and output  random field */
+        rms = 0.;
+        for(i=0;i<N;i++)
+        for(j=0;j<N;j++) {
+            rms += _del[i][j]*_del[i][j] * Dtl;
+            output_video[n] = _del[i][j];
+            n++;
+        }
+        rms = sqrt(rms)/N;
+
+        if (verbose) {
+            fprintf(stderr,"%lf %lf\n",t, rms);
+        }
+    }
+
+
 }
 
 
