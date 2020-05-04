@@ -25,6 +25,7 @@ setup(
                       "matplotlib",
                       "pandas",
                       "xarray",
+                      "tensorboardX",
                       "future"],
     ext_modules=cythonize(extensions)
 )

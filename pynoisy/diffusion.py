@@ -15,12 +15,10 @@ def grid(principle_angle, correlation_time, correlation_length, tensor_ratio):
             'correlation_time': (_grid.dims, correlation_time),
             'correlation_length': (_grid.dims, correlation_length),
             'diffusion_coefficient': (_grid.dims, diffusion_coefficient),
+            'tensor_ratio': tensor_ratio
         },
         coords=_grid.coords,
-        attrs={
-            'diffusion_model': 'grid',
-            'tensor_ratio': tensor_ratio,
-        }
+        attrs={'diffusion_model': 'grid'}
     )
     return diffusion
 
@@ -50,6 +48,50 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
     new_attrs = {
         'diffusion_model': 'ring',
         'opening_angle': opening_angle,
+        'tau': tau,
+        'lam': lam,
+        'scaling_radius': scaling_radius
+    }
+    diffusion.attrs.update(new_attrs)
+    return diffusion
+
+def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, tau=1.0, lam=0.5, scaling_radius=0.2):
+    """
+    TODO
+
+    Parameters
+    ----------
+    length_scale : float or array with shape (n_features,), default: 1.0
+        The length scale of the kernel. If a float, an isotropic kernel is
+        used. If an array, an anisotropic kernel is used where each dimension
+        of l defines the length-scale of the respective feature dimension.
+    tau: float, default=1.0
+        product of correlation time and local Keplerian frequency
+    lam: float, default=0.5
+        ratio of correlation length to local radius
+    scaling_radius: float, default=0.2
+        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
+    tensor_ratio: float, default=0.1
+        ratio for the diffusion tensor along the two principal axis.
+    """
+    from sklearn.gaussian_process.kernels import Matern
+    kernel = Matern(length_scale=length_scale)
+    _grid = utils.get_grid()
+    x, y = np.meshgrid(_grid.x, _grid.y)
+    covariance = kernel(np.array([x.ravel(), y.ravel()]).T)
+    print('Sampling diffusion principle angle from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
+    principle_angle = np.random.multivariate_normal(np.zeros(x.size), covariance)
+    diffusion = grid(
+        principle_angle=principle_angle.reshape(x.shape),
+        correlation_time=core.get_disk_correlation_time(tau, scaling_radius),
+        correlation_length=core.get_disk_correlation_length(scaling_radius, lam),
+        tensor_ratio=tensor_ratio
+    )
+    diffusion['covariance'] = xr.DataArray(covariance, coords=[x.ravel(), y.ravel()], dims=['i', 'j'])
+    new_attrs = {
+        'diffusion_model': 'multivariate_gaussian',
+        'kernel': 'Matern',
+        'length_scale': length_scale,
         'tau': tau,
         'lam': lam,
         'scaling_radius': scaling_radius

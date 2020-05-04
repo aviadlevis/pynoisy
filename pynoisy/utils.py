@@ -3,8 +3,19 @@ import matplotlib.pyplot as plt
 import xarray as xr
 import numpy as np
 from matplotlib import animation
-from ipywidgets import interact, fixed
+from ipywidgets import interact, fixed, interactive
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from IPython.display import display
+import glob
+
+def slider_select_file(dir, filetype=None):
+    def select_path(i, paths):
+        print(paths[i])
+        return paths[i]
+    paths = glob.glob(dir + '*.{}'.format(filetype if filetype is not None else '*'))
+    file = interactive(select_path, i=(0, len(paths)-1), paths=fixed(paths));
+    display(file)
+    return file
 
 def get_grid():
     """TODO"""
@@ -17,12 +28,21 @@ def get_grid():
     )
     return grid
 
-def compare_movie_frames(frames1, frames2):
+
+def compare_movie_frames(frames1, frames2, scale='amp'):
     fig, axes = plt.subplots(1, 3, figsize=(9, 3))
     plt.tight_layout()
     mean_images = [frames1.mean(axis=0), frames2.mean(axis=0),
                    (np.abs(frames1 - frames2)).mean(axis=0)]
     cbars = []
+    titles = [None]*3
+    titles[0] = frames1.name if frames1.name is not None else 'Movie1'
+    titles[1] = frames2.name if frames2.name is not None else 'Movie2'
+    if scale == 'amp':
+        titles[2] = 'Absolute difference'
+    elif scale == 'log':
+        titles[2] = 'Log relative difference'
+
     for ax, image in zip(axes, mean_images):
         im = ax.imshow(image)
         ax.get_xaxis().set_visible(False)
@@ -34,11 +54,15 @@ def compare_movie_frames(frames1, frames2):
     def imshow_frame(i, frames1, frames2, axes, cbars):
         image1 = frames1[i]
         image2 = frames2[i]
-        image3 = np.abs(frames1[i] - frames2[i])
 
-        for ax, img, title, cbar in zip(axes, [image1, image2, image3],
-                                        ['Movie1', 'Movie2', 'Absolute difference'], cbars):
-            im = ax.imshow(img)
+
+        if scale == 'amp':
+            image3 = np.abs(frames1[i] - frames2[i])
+        elif scale == 'log':
+            image3 = np.log(np.abs(frames1[i]/frames2[i]))
+
+        for ax, img, title, cbar in zip(axes, [image1, image2, image3], titles, cbars):
+            ax.imshow(img)
             ax.set_title(title)
             cbar.mappable.set_clim([img.min(), img.max()])
 
@@ -47,6 +71,32 @@ def compare_movie_frames(frames1, frames2):
         imshow_frame, i=(0, num_frames - 1),
         frames1=fixed(frames1), frames2=fixed(frames2), axes=fixed(axes), cbars=fixed(cbars)
     );
+
+
+def get_krylov_matrix(b, forward_fn, degree):
+    """
+    Compute a matrix with column vectors spanning the Krylov subspace of a certain degree.
+    This is done by senquential applications of the forward operator.
+
+    Parameters
+    ----------
+    b: xr.DataArray or numpy.ndarray, shape=(num_frames, nx, ny)
+        b is a video, typically the measurement vector.
+    forward_fn: function,
+        The forward function, should be self-adjoint or support senquential applications: F(F(b))
+    degree: int
+        The degree of the Krylov matrix.
+
+    Returns
+    -------
+    k_matrix: np.ndarray(shape=(degree, b.size))
+        The Krylov matrix with column vectors: (F(b), F(F(b)), F(F(F(b)))...)
+    """
+    k_matrix = []
+    for i in range(degree):
+        b = forward_fn(b)
+        k_matrix.append(np.array(b).ravel())
+    return np.array(k_matrix)
 
 
 @xr.register_dataset_accessor("noisy_methods")

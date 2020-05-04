@@ -4,72 +4,74 @@ TODO: Some documentation and general description goes here.
 import xarray as xr
 import numpy as np
 import core
+import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
 class NoisySolver(object):
     """TODO"""
-    def __init__(self, advection=None, diffusion=None, coefficients=None, forcing_strength=1.0, seed=None):
-        if coefficients is not None:
-            self._coefficients = coefficients
-        else:
-            assert (advection is not None) and (diffusion is not None), 'Either coeffiecient (merge of advection and diffusion) or both advection and diffusion should be input'
-            self._coefficients = xr.merge([advection, diffusion])
-            self._coefficients.attrs['advection'] = advection.attrs
-            self._coefficients.attrs['diffusion'] = diffusion.attrs
-            self._coefficients.attrs['forcing_strength'] = forcing_strength
-            self._coefficients.attrs['num_frames'] = core.get_num_frames()
-
-        self._diffusion_vars = ['principle_angle', 'correlation_time', 'correlation_length', 'diffusion_coefficient']
-        self._advection_vars = ['vx', 'vy']
+    def __init__(self, advection, diffusion, forcing_strength=1.0, seed=None):
+        self._advection = advection.copy(deep=True)
+        self._diffusion = diffusion.copy(deep=True)
+        self._params = utils.get_grid()
+        self._params.update({'forcing_strength': forcing_strength,
+                             'seed': None, 'num_frames': core.get_num_frames()})
+        self._params.attrs = {'solver_type': 'Noisy'}
         self.reseed(seed)
 
-    def copy(self):
-        return NoisySolver(coefficients=self.coefficients.copy())
+    def copy(self, deep=True):
+        """TODO"""
+        return NoisySolver(
+            advection=self.advection.copy(deep=deep), diffusion=self.diffusion.copy(deep=deep),
+            forcing_strength=self.forcing_strength, seed=self.seed)
 
     def reseed(self, seed=None):
         seed = np.random.randint(0, 32767) if seed is None else seed
-        self.coefficients.attrs['seed'] = seed
+        self._params['seed'] = seed
         print('Setting solver seed to: {}'.format(self.seed), end='\r')
 
-    def set_advection(self, advection):
+    def update_advection(self, advection):
         """TODO"""
-        self._coefficients.update(advection)
-        self._coefficients.attrs['advection'] = advection.attrs
+        self._advection.update(advection)
+        self._advection.attrs = advection.attrs
 
-    def set_diffusion(self, diffusion):
+    def update_diffusion(self, diffusion):
         """TODO"""
-        self._coefficients.update(diffusion)
-        self._coefficients.attrs['diffusion'] = diffusion.attrs
+        self._diffusion.update(diffusion)
+        self._diffusion.attrs = diffusion.attrs
 
-    def run_asymmetric(self, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1):
+    def run_asymmetric(self, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
+
+        if seed is not None:
+            self.reseed(seed)
+
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
         if n_jobs == 1:
             pixels = [core.run_asymmetric(
-                self.coefficients.attrs['diffusion']['tensor_ratio'],
+                self.diffusion.tensor_ratio,
                 self.forcing_strength, evolution_length,
-                np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
-                np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
-                np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
                 verbose, self.seed) for i in sample_range]
 
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
                 delayed(core.run_asymmetric)(
-                    self.coefficients.attrs['diffusion']['tensor_ratio'],
+                    self.diffusion.tensor_ratio,
                     self.forcing_strength, evolution_length,
-                    np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                     np.array(self.v, dtype=np.float64, order='C'),
-                    np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
-                    np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
                     False, self.seed + i) for i in sample_range)
 
         movie = xr.DataArray(data=pixels,
                              coords={'sample': range(num_samples),
                                      't': np.linspace(0, evolution_length, self.num_frames),
-                                     'x': self.coefficients.x, 'y': self.coefficients.y},
+                                     'x': self.params.x, 'y': self.params.y},
                              dims=['sample', 't', 'x', 'y'])
         if num_samples == 1:
             movie.attrs['seed'] = self.seed
@@ -78,8 +80,11 @@ class NoisySolver(object):
             movie.coords['seed'] = ('sample', self.seed + np.arange(num_samples))
         return movie
 
-    def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1):
+    def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
+
+        if seed is not None:
+            self.reseed(seed)
 
         # Either pre-determined source or randomly sampled from Gaussian distribution
         if source is None:
@@ -102,26 +107,26 @@ class NoisySolver(object):
 
         if n_jobs == 1:
             pixels = [core.run_symmetric(
-                np.array(self.coefficients.attrs['diffusion']['tensor_ratio'], dtype=np.float64, order='C'),
-                evolution_length, np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
+                evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
-                np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
-                np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
                 np.array(source[i], dtype=np.float64, order='C'), verbose) for i in sample_range]
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
                 delayed(core.run_symmetric)(
-                np.array(self.coefficients.attrs['diffusion']['tensor_ratio'], dtype=np.float64, order='C'),
-                evolution_length, np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
+                np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
+                evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
-                np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
-                np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+                np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
                 np.array(source[i], dtype=np.float64, order='C'), verbose) for i in sample_range)
 
         movie = xr.DataArray(data=pixels,
                              coords={'sample': range(num_samples),
                                      't': np.linspace(0, evolution_length, self.num_frames),
-                                     'x': self.coefficients.x, 'y': self.coefficients.y},
+                                     'x': self.params.x, 'y': self.params.y},
                              dims=['sample', 't', 'x', 'y'])
 
         movie.attrs['source'] = source_attr
@@ -131,51 +136,75 @@ class NoisySolver(object):
 
         return movie
 
+    def run_adjoint(self, source, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1):
+        advection = self.advection
+        self.update_advection(-advection)
+        adjoint = self.run_symmetric(source, evolution_length, verbose, num_samples, n_jobs)
+        self.update_advection(advection)
+        return adjoint
+
     def get_laplacian(self, movie):
         lap = core.get_laplacian(
-            self.coefficients.diffusion['tensor_ratio'],
-            np.array(self.coefficients.principle_angle, dtype=np.float64, order='C'),
-            np.array(self.coefficients.diffusion_coefficient, dtype=np.float64, order='C'),
+            self.diffusion.tensor_ratio,
+            np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
+            np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
             np.array(self.v, dtype=np.float64, order='C'),
-            np.array(self.coefficients.correlation_time, dtype=np.float64, order='C'),
+            np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
             np.array(movie, dtype=np.float64, order='C')
         )
         laplacian = xr.DataArray(data=lap, coords=movie.coords, dims=movie.dims)
         return laplacian
 
-    @property
-    def coefficients(self):
-        return self._coefficients
+    def adjoint_angle_derivative(self, forward, adjoint):
+        gradient = core.adjoint_angle_derivative(
+            self.diffusion.tensor_ratio,
+            np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
+            np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+            np.array(self.v, dtype=np.float64, order='C'),
+            np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
+            np.array(forward, dtype=np.float64, order='C'),
+            np.array(adjoint, dtype=np.float64, order='C')
+        )
+        gradient = xr.DataArray(data=gradient, coords=self.params.coords, dims=self.params.dims)
+        return gradient
+
+    def save(self, path):
+        self.params.to_netcdf(path, mode='w')
+        self.advection.to_netcdf(path, group='advection', mode='a')
+        self.diffusion.to_netcdf(path, group='diffusion', mode='a')
+
+    @classmethod
+    def from_netcdf(cls, path):
+        params = xr.load_dataset(path)
+        return cls(advection=xr.load_dataset(path, group='advection'),
+                   diffusion=xr.load_dataset(path, group='diffusion'),
+                   forcing_strength=params.forcing_strength.data, seed=params.seed.data)
 
     @property
-    def num_frames(self):
-        return self.coefficients.num_frames
-
-    @property
-    def forcing_strength(self):
-        return self.coefficients.forcing_strength
-
-    @property
-    def diffusion(self):
-        diffusion = self.coefficients[self._diffusion_vars]
-        diffusion.attrs = self.coefficients.diffusion
-        return diffusion
-
-    @property
-    def advection(self):
-        advection = self.coefficients[self._advection_vars]
-        advection.attrs = self.coefficients.advection
-        return advection
-
-    @property
-    def v(self):
-        return np.stack([self.coefficients.vx, self.coefficients.vy], axis=-1)
-
-    @property
-    def pixels(self):
-        return self.coefficients.pixels
+    def params(self):
+        return self._params
 
     @property
     def seed(self):
-        return self.coefficients.seed
+        return int(self.params.seed)
+
+    @property
+    def num_frames(self):
+        return int(self.params.num_frames)
+
+    @property
+    def forcing_strength(self):
+        return float(self.params.forcing_strength)
+
+    @property
+    def diffusion(self):
+        return self._diffusion
+
+    @property
+    def advection(self):
+        return self._advection
+
+    @property
+    def v(self):
+        return np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
