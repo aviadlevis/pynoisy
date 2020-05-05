@@ -203,7 +203,8 @@ class Optimizer(object):
         loss, gradient = self._objective_fn(state)
         if self._prior_fn is not None:
             p_loss, p_gradient = np.array([prior(state) for prior in self._prior_fn]).sum(axis=0)
-        return loss + p_loss, gradient + p_gradient
+            loss, gradient = loss + p_loss, gradient + p_gradient
+        return loss, gradient
 
     def minimize(self, initial_state):
         """

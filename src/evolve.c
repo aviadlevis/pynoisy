@@ -490,9 +490,9 @@ void get_angle_derivative_image(
                 F_coeff_grady[i][j][0]*grady
                 );
 
-            gradient[ip*N+j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*del[n*N*N+ip*N+j]*adjoint[n*N*N+ip*N+j] / (dx*dx)
-            gradient[i*N+j]  += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*gradx*adjoint[n*N*N+ip*N+j] / dx
-            gradient[i*N+j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*grady*adjoint[n*N*N+ip*N+j] / dx
+            gradient[ip*N+j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*del[n*N*N+ip*N+j]*adjoint[n*N*N+ip*N+j] / (dx*dx) ;
+            gradient[i*N+j]  += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*gradx*adjoint[n*N*N+ip*N+j] / dx ;
+            gradient[i*N+j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*grady*adjoint[n*N*N+ip*N+j] / dx ;
 
             /* upper y face */
             gradx = 0.5*(
@@ -527,7 +527,7 @@ void get_angle_derivative_image(
                 F_coeff_grady[i][j][3]*grady
                 );
 
-            gradient[i*N + j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*gradx*adjoint[n*N*N+ip*N+j] / dx
+            gradient[i*N + j] += (1.0/(NUM_IMAGES*N*N)) * F_coeff_gradx[i][j][0]*gradx*adjoint[n*N*N+ip*N+j] / dx;
 
             gradient[i*N + j] += (1.0/(NUM_IMAGES*N*N)) * (Fxp - Fxm)/dx + (Fyp - Fym)/dy ;
         }

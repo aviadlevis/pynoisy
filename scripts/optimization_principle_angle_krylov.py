@@ -12,7 +12,7 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir',
-                        default='runs/priniple_angle_init[zero]_krylovdeg[{deg}]_mask[disk]_prior[{prior}]_seed[{seed}]',
+                        default='runs',
                         help='(default value: %(default)s) Path to directory and file name.')
     parser.add_argument('--deg',
                          type=int,
@@ -64,7 +64,9 @@ measurements = solver.run_symmetric()
 
 
 # Initialize mask of inverse solver
-logdir = args.logdir.format(deg=args.deg, seed=solver.seed, prior=args.prior)
+run_name =  'priniple_angle_init[zero]_krylovdeg[{deg}]_mask[disk]_prior[{prior}]_seed[{seed}]'.format(
+    deg=args.deg, seed=solver.seed, prior=args.prior)
+logdir = os.path.join(args.logdir, run_name)
 writer = SummaryWriter(logdir=logdir)
 
 solver.save(path=os.path.join(logdir, 'ground_truth.nc'))
@@ -90,20 +92,20 @@ forward_op = ForwardOperator.krylov(
 )
 objective_fn = ObjectiveFunction.l2(measurements, forward_op)
 
-if args.prior is None:
-    prior_fn = None
-    loss_callback_fn = CallbackFn(lambda: writer.add_scalar('Loss', objective_fn.loss, optimizer.iteration))
-else:
+if args.prior:
     if args.diffusion_model == 'random':
         flat_mask = np.array(solver.params.mask).ravel()
         covariance_mask = np.dot(flat_mask[:, None], flat_mask[None])
-        cov = diffusion_true.covariance.values[covariance_mask].reshape(solver.params.num_unknowns,
-                                                                        solver.params.num_unknowns)
+        cov = diffusion_true.covariance.values[covariance_mask].reshape(
+            solver.params.num_unknowns, solver.params.num_unknowns)
         prior_fn = PriorFunction.mahalanobis(mean=0.0, cov=cov, scale=1e-4)
         loss_callback_fn = CallbackFn(lambda: writer.add_scalars(
             'Loss', {'total': objective_fn.loss + prior_fn.loss, 'datafit': objective_fn.loss, 'prior': prior_fn.loss}, optimizer.iteration))
     else:
         raise AttributeError('Prior function not implemented for diffusion_model={}'.format(args.diffusion_model))
+else:
+    prior_fn = None
+    loss_callback_fn = CallbackFn(lambda: writer.add_scalar('Loss', objective_fn.loss, optimizer.iteration))
 
 
 # Define callback functions for routine checks/analysis of the state
