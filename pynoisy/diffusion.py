@@ -55,7 +55,7 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
     diffusion.attrs.update(new_attrs)
     return diffusion
 
-def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, tau=1.0, lam=0.5, scaling_radius=0.2):
+def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, max_diffusion_coef=1.0, max_correlation_time=1.0):
     """
     TODO
 
@@ -65,26 +65,31 @@ def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, tau=1.0, lam=0.5, 
         The length scale of the kernel. If a float, an isotropic kernel is
         used. If an array, an anisotropic kernel is used where each dimension
         of l defines the length-scale of the respective feature dimension.
-    tau: float, default=1.0
-        product of correlation time and local Keplerian frequency
-    lam: float, default=0.5
-        ratio of correlation length to local radius
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
     tensor_ratio: float, default=0.1
         ratio for the diffusion tensor along the two principal axis.
     """
-    from sklearn.gaussian_process.kernels import Matern
-    kernel = Matern(length_scale=length_scale)
-    _grid = utils.get_grid()
-    x, y = np.meshgrid(_grid.x, _grid.y)
-    covariance = kernel(np.array([x.ravel(), y.ravel()]).T)
+    covariance = utils.matern_covariance(length_scale=length_scale)
+
     print('Sampling diffusion principle angle from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
     principle_angle = np.random.multivariate_normal(np.zeros(x.size), covariance)
+
+    print('Sampling correlation time from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
+    correlation_time = np.random.multivariate_normal(np.zeros(x.size), covariance)
+    correlation_time = np.exp(correlation_time)
+    correlation_time = max_correlation_time * correlation_time / correlation_time.max()
+
+    print('Sampling diffusion coefficient from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
+    diffusion_coefficient = np.random.multivariate_normal(np.zeros(x.size), covariance)
+    diffusion_coefficient = max_diffusion_coef * (diffusion_coefficient - diffusion_coefficient.min()) / \
+                            (diffusion_coefficient.max() - diffusion_coefficient.min())
+
+    # diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
+    correlation_length = np.sqrt(0.5 * diffusion_coefficient * correlation_time)
+
     diffusion = grid(
         principle_angle=principle_angle.reshape(x.shape),
-        correlation_time=core.get_disk_correlation_time(tau, scaling_radius),
-        correlation_length=core.get_disk_correlation_length(scaling_radius, lam),
+        correlation_time=correlation_time.reshape(x.shape),
+        correlation_length=correlation_length.reshape(x.shape),
         tensor_ratio=tensor_ratio
     )
     diffusion['covariance'] = xr.DataArray(covariance, coords=[x.ravel(), y.ravel()], dims=['i', 'j'])
@@ -92,9 +97,11 @@ def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, tau=1.0, lam=0.5, 
         'diffusion_model': 'multivariate_gaussian',
         'kernel': 'Matern',
         'length_scale': length_scale,
-        'tau': tau,
-        'lam': lam,
-        'scaling_radius': scaling_radius
+        'max_diffusion_coef': max_diffusion_coef,
+        'max_corr_time': max_correlation_time,
+        'principle_angle_model': 'unnormalized',
+        'corr_time_model': 'normalized (exponential)',
+        'diffusion_coef_model': 'normalized (linear)'
     }
     diffusion.attrs.update(new_attrs)
     return diffusion

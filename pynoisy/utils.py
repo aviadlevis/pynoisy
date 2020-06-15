@@ -8,11 +8,25 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
 import glob
 
+
+def matern_covariance(length_scale):
+    from sklearn.gaussian_process.kernels import Matern
+    kernel = Matern(length_scale=length_scale)
+    _grid = get_grid()
+    x, y = np.meshgrid(_grid.x, _grid.y)
+    covariance = kernel(np.array([x.ravel(), y.ravel()]).T)
+    return covariance
+
 def slider_select_file(dir, filetype=None):
+    from pathlib import Path
+
     def select_path(i, paths):
         print(paths[i])
         return paths[i]
-    paths = glob.glob(dir + '*.{}'.format(filetype if filetype is not None else '*'))
+
+    filetype = '*' if filetype is None else '*.' + filetype
+    paths = [str(path) for path in Path(dir).rglob('*.fits')]
+    names = [path.name for path in Path(dir).rglob('*.fits')]
     file = interactive(select_path, i=(0, len(paths)-1), paths=fixed(paths));
     display(file)
     return file
@@ -27,7 +41,6 @@ def get_grid():
                 }
     )
     return grid
-
 
 def compare_movie_frames(frames1, frames2, scale='amp'):
     fig, axes = plt.subplots(1, 3, figsize=(9, 3))

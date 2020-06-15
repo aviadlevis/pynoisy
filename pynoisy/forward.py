@@ -80,6 +80,21 @@ class NoisySolver(object):
             movie.coords['seed'] = ('sample', self.seed + np.arange(num_samples))
         return movie
 
+    def symmetric_source(self, evolution_length=0.1, num_samples=1, seed=None):
+        if seed is not None:
+            np.random.seed(seed)
+        else:
+            np.random.seed(self.seed)
+        source = np.random.randn(num_samples, self.num_frames, *core.get_image_size()) * self.forcing_strength
+        movie = xr.DataArray(data=source,
+                             coords={'sample': range(num_samples),
+                                     't': np.linspace(0, evolution_length, self.num_frames),
+                                     'x': self.params.x, 'y': self.params.y},
+                             dims=['sample', 't', 'x', 'y'])
+        if num_samples == 1:
+            movie = movie.squeeze('sample')
+        return movie
+
     def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
 
@@ -98,8 +113,8 @@ class NoisySolver(object):
                 source = np.expand_dims(source, 0) if source.ndim==3 else source
                 num_samples = source.shape[0]
             elif source_type == xr.DataArray:
-                num_samples = source.sample.size
                 source = source.expand_dims('sample') if 'sample' not in source.dims else source
+                num_samples = source.sample.size
             else:
                 raise AttributeError('Source type ({}) not implemented'.format(source_type))
 
@@ -176,9 +191,11 @@ class NoisySolver(object):
     @classmethod
     def from_netcdf(cls, path):
         params = xr.load_dataset(path)
-        return cls(advection=xr.load_dataset(path, group='advection'),
+        solver = cls(advection=xr.load_dataset(path, group='advection'),
                    diffusion=xr.load_dataset(path, group='diffusion'),
                    forcing_strength=params.forcing_strength.data, seed=params.seed.data)
+        solver._params = params
+        return solver
 
     @property
     def params(self):

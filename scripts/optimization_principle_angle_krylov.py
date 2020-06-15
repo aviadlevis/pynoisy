@@ -2,6 +2,7 @@ import os
 import numpy as np
 import argparse
 import pynoisy
+import xarray as xr
 from pynoisy.inverse import SummaryWriter, Optimizer, ForwardOperator, ObjectiveFunction, PriorFunction, CallbackFn
 
 def parse_arguments():
@@ -11,6 +12,8 @@ def parse_arguments():
         args (Namespace): an argparse Namspace object with all the command line arguments.
     """
     parser = argparse.ArgumentParser()
+    parser.add_argument('--load_path',
+                        help='(default value: %(default)s) Path to load pre-computed solver and measurements.')
     parser.add_argument('--logdir',
                         default='runs',
                         help='(default value: %(default)s) Path to directory and file name.')
@@ -24,14 +27,18 @@ def parse_arguments():
                          help='(default value: %(default)s) Seed for random number generator. None gives a random seed.')
     parser.add_argument('--diffusion_model',
                          type=str,
-                         choices=['ring', 'random'],
+                         choices=['ring', 'multivariate_gaussian'],
                          default='ring',
-                         help='(default value: %(default)s) Diffusion model. If random, correlation length (args.length_scale) is taken into account')
+                         help='(default value: %(default)s) Diffusion model. If multivariate_gaussian, '
+                              'correlation length (args.length_scale) is taken into account')
     parser.add_argument('--length_scale',
                          type=float,
                          default=0.1,
-                         help='(default value: %(default)s) Correlation length for random diffusion model')
-    parser.add_argument('--prior', action='store_true', help='Using a prior')
+                         help='(default value: %(default)s) Correlation length for multivariate_gaussian diffusion model')
+    parser.add_argument('--prior_weight',
+                         type=float,
+                         default=0.0,
+                         help='(default value: %(default)s) Weight on the prior term')
     args = parser.parse_args()
     return args
 
@@ -53,19 +60,23 @@ def set_state(solver, state):
 # Parse input arguments
 args = parse_arguments()
 
-# Generate synthetic measurements
-advection_true = pynoisy.advection.disk()
-if args.diffusion_model == 'random':
-    diffusion_true = pynoisy.diffusion.multivariate_gaussian(length_scale=args.length_scale)
-elif args.diffusion_model == 'ring':
-    diffusion_true = pynoisy.diffusion.ring()
-solver = pynoisy.forward.NoisySolver(advection_true, diffusion_true, seed=args.seed)
-measurements = solver.run_symmetric()
-
+if args.load_path is None:
+    # Generate synthetic measurements
+    advection_true = pynoisy.advection.disk()
+    if args.diffusion_model == 'multivariate_gaussian':
+        diffusion_true = pynoisy.diffusion.multivariate_gaussian(length_scale=args.length_scale)
+    elif args.diffusion_model == 'ring':
+        diffusion_true = pynoisy.diffusion.ring()
+    solver = pynoisy.forward.NoisySolver(advection_true, diffusion_true, seed=args.seed)
+    measurements = solver.run_symmetric()
+else:
+    # Load measurements and solver
+    measurements = xr.load_dataarray(os.path.join(args.load_path,'measurements.nc'))
+    solver = pynoisy.forward.NoisySolver.from_netcdf(os.path.join(args.load_path, 'ground_truth.nc'))
 
 # Initialize mask of inverse solver
 run_name =  'priniple_angle_init[zero]_krylovdeg[{deg}]_mask[disk]_prior[{prior}]_seed[{seed}]'.format(
-    deg=args.deg, seed=solver.seed, prior=args.prior)
+    deg=args.deg, seed=solver.seed, prior=args.prior_weight)
 logdir = os.path.join(args.logdir, run_name)
 writer = SummaryWriter(logdir=logdir)
 
@@ -92,13 +103,13 @@ forward_op = ForwardOperator.krylov(
 )
 objective_fn = ObjectiveFunction.l2(measurements, forward_op)
 
-if args.prior:
-    if args.diffusion_model == 'random':
+if args.prior_weight:
+    if solver.diffusion.diffusion_model == 'multivariate_gaussian':
         flat_mask = np.array(solver.params.mask).ravel()
         covariance_mask = np.dot(flat_mask[:, None], flat_mask[None])
-        cov = diffusion_true.covariance.values[covariance_mask].reshape(
+        cov = solver.diffusion.covariance.values[covariance_mask].reshape(
             solver.params.num_unknowns, solver.params.num_unknowns)
-        prior_fn = PriorFunction.mahalanobis(mean=0.0, cov=cov, scale=1e-4)
+        prior_fn = PriorFunction.mahalanobis(mean=0.0, cov=cov, scale=args.prior_weight)
         loss_callback_fn = CallbackFn(lambda: writer.add_scalars(
             'Loss', {'total': objective_fn.loss + prior_fn.loss, 'datafit': objective_fn.loss, 'prior': prior_fn.loss}, optimizer.iteration))
     else:
@@ -117,6 +128,7 @@ callback_fn = [
     CallbackFn(lambda: writer.average_image('average_frame/estimate', solver.run_symmetric(verbose=False), optimizer.iteration), ckpt_period=5*60),
     CallbackFn(lambda: optimizer.save_checkpoint(solver, logdir), ckpt_period=1*60*60)
 ]
+
 options={'maxiter': 10000, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}
 optimizer = Optimizer(objective_fn, prior_fn=prior_fn, callback_fn=callback_fn, options=options)
 

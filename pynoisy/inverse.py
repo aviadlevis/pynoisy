@@ -7,6 +7,7 @@ import time
 import tensorboardX
 import matplotlib.pyplot as plt
 import os
+from matplotlib.colors import Normalize
 
 class SummaryWriter(tensorboardX.SummaryWriter):
     def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10, flush_secs=120,
@@ -19,20 +20,40 @@ class SummaryWriter(tensorboardX.SummaryWriter):
         np.mod(principle_angle, np.pi).where(mask).plot(cmap='hsv')
         self.add_figure(tag, plt.gcf(), global_step)
 
-    def diffusion(self, tag, diffusion, global_step=None):
+
+    def envelope(self, tag, envelope, global_step=None):
+        plt.style.use('default')
+        envelope.plot()
+        self.add_figure(tag, plt.gcf(), global_step)
+
+
+    def diffusion(self, tag, diffusion,mask=None, global_step=None, vector_plot=False, envelope=None):
         """TODO"""
         plt.style.use('default')
-        diffusion.noisy_methods.plot_principal_axis()
-        self.add_figure(tag + '_principle', plt.gcf(), global_step)
-        diffusion.noisy_methods.plot_secondary_axis()
-        self.add_figure(tag + '_secondary', plt.gcf(), global_step)
-        np.mod(diffusion.principle_angle, np.pi).plot(cmap='hsv')
+
+        if vector_plot:
+            diffusion.noisy_methods.plot_principal_axis()
+            self.add_figure(tag + '_principle', plt.gcf(), global_step)
+            diffusion.noisy_methods.plot_secondary_axis()
+            self.add_figure(tag + '_secondary', plt.gcf(), global_step)
+
+        if envelope is None:
+            np.mod(diffusion.principle_angle, np.pi).where(mask).plot(cmap='hsv')
+        else:
+            alphas = Normalize(0, envelope.max(), clip=True)(envelope)
+            colors = Normalize(0, np.pi)(np.mod(diffusion.principle_angle, np.pi))
+            cmap = plt.cm.hsv
+            colors = cmap(colors)
+            colors[..., -1] = alphas
+            plt.imshow(colors)
+            plt.gca().invert_yaxis()
+
         self.add_figure(tag + '_angle', plt.gcf(), global_step)
-        diffusion.correlation_length.plot()
+        diffusion.correlation_length.where(mask).plot()
         self.add_figure(tag + '_correlation_length', plt.gcf(), global_step)
-        diffusion.correlation_time.plot()
+        diffusion.correlation_time.where(mask).plot()
         self.add_figure(tag + '_correlation_time', plt.gcf(), global_step)
-        diffusion.diffusion_coefficient.plot()
+        diffusion.diffusion_coefficient.where(mask).plot()
         self.add_figure(tag + '_diffusion_coefficient', plt.gcf(), global_step)
 
     def advection(self, tag, advection, global_step=None):
@@ -91,7 +112,7 @@ class ForwardOperator(object):
 
 class ObjectiveFunction(object):
     def __init__(self, measurements, forward_op, loss_fn, min_bounds=None, max_bounds=None):
-        self._measurements = measurements
+        self.set_measurements(measurements)
         self._loss_fn = loss_fn
         self._forward_op = forward_op
         self._loss = None
@@ -102,6 +123,9 @@ class ObjectiveFunction(object):
         loss, gradient = self._loss_fn(state, self.forward_op, self.measurements)
         self._loss = loss
         return np.array(loss), np.array(gradient)
+
+    def set_measurements(self, measurements):
+        self._measurements = measurements
 
     @classmethod
     def l2(cls, measurements, forward_op, min_bounds=None, max_bounds=None):
@@ -130,7 +154,6 @@ class ObjectiveFunction(object):
     @property
     def loss(self):
         return self._loss
-
 
 class PriorFunction(object):
     def __init__(self, prior_fn, scale=1.0):
@@ -176,7 +199,8 @@ class Optimizer(object):
                  prior_fn=None,
                  callback_fn=None,
                  method='L-BFGS-B',
-                 options={'maxiter': 100, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}):
+                 options={'maxiter': 100, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}
+                 ):
         from scipy.optimize import minimize
         self._minimize = minimize
         self._method = method
@@ -184,7 +208,6 @@ class Optimizer(object):
         self._objective_fn = objective_fn
         self._prior_fn = np.atleast_1d(prior_fn) if prior_fn is not None else None
         self._callback_fn = np.atleast_1d(callback_fn)
-        self._iteration = 0
         self._callback = None if callback_fn is None else self.callback
 
     def callback(self, state):
@@ -206,10 +229,11 @@ class Optimizer(object):
             loss, gradient = loss + p_loss, gradient + p_gradient
         return loss, gradient
 
-    def minimize(self, initial_state):
+    def minimize(self, initial_state, iteration_step=0):
         """
         Local minimization with respect to the parameters defined.
         """
+        self._iteration = iteration_step
         args = {
             'fun': self.objective,
             'x0': initial_state,

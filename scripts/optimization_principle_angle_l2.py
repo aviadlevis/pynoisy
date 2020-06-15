@@ -29,6 +29,7 @@ def compute_gradient(solver, forward, adjoint, dx=1e-2):
             gradient[i,j] += (adjoint * source_ij).mean()
     return gradient
 
+
 forward_fn = lambda: solver.run_symmetric(verbose=False)
 adjoint_fn = lambda source: solver.run_adjoint(source, verbose=False)
 gradient_fn = lambda forward, adjoint: compute_gradient(solver, forward, adjoint)
