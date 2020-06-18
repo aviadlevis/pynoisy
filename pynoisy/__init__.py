@@ -6,7 +6,7 @@ import pynoisy.advection
 import pynoisy.envelope
 import pynoisy.forward
 import pynoisy.utils
-import core
+import noisy_core, hgrf_core
 
 
 

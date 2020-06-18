@@ -3,7 +3,7 @@ TODO: Some documentation and general description goes here.
 """
 import xarray as xr
 import numpy as np
-import core
+import noisy_core
 import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -15,7 +15,7 @@ class NoisySolver(object):
         self._diffusion = diffusion.copy(deep=True)
         self._params = utils.get_grid()
         self._params.update({'forcing_strength': forcing_strength,
-                             'seed': None, 'num_frames': core.get_num_frames()})
+                             'seed': None, 'num_frames': noisy_core.get_num_frames()})
         self._params.attrs = {'solver_type': 'Noisy'}
         self.reseed(seed)
 
@@ -48,7 +48,7 @@ class NoisySolver(object):
 
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
         if n_jobs == 1:
-            pixels = [core.run_asymmetric(
+            pixels = [noisy_core.run_asymmetric(
                 self.diffusion.tensor_ratio,
                 self.forcing_strength, evolution_length,
                 np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
@@ -59,7 +59,7 @@ class NoisySolver(object):
 
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
-                delayed(core.run_asymmetric)(
+                delayed(noisy_core.run_asymmetric)(
                     self.diffusion.tensor_ratio,
                     self.forcing_strength, evolution_length,
                     np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
@@ -85,7 +85,7 @@ class NoisySolver(object):
             np.random.seed(seed)
         else:
             np.random.seed(self.seed)
-        source = np.random.randn(num_samples, self.num_frames, *core.get_image_size()) * self.forcing_strength
+        source = np.random.randn(num_samples, self.num_frames, *noisy_core.get_image_size()) * self.forcing_strength
         movie = xr.DataArray(data=source,
                              coords={'sample': range(num_samples),
                                      't': np.linspace(0, evolution_length, self.num_frames),
@@ -105,7 +105,7 @@ class NoisySolver(object):
         if source is None:
             source_attr = 'random (numpy)'
             np.random.seed(self.seed)
-            source = np.random.randn(num_samples, self.num_frames, *core.get_image_size()) * self.forcing_strength
+            source = np.random.randn(num_samples, self.num_frames, *noisy_core.get_image_size()) * self.forcing_strength
         else:
             source_attr = 'controlled (input)'
             source_type = type(source)
@@ -121,7 +121,7 @@ class NoisySolver(object):
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
 
         if n_jobs == 1:
-            pixels = [core.run_symmetric(
+            pixels = [noisy_core.run_symmetric(
                 np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
                 evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
@@ -130,7 +130,7 @@ class NoisySolver(object):
                 np.array(source[i], dtype=np.float64, order='C'), verbose) for i in sample_range]
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
-                delayed(core.run_symmetric)(
+                delayed(noisy_core.run_symmetric)(
                 np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
                 evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
@@ -159,7 +159,7 @@ class NoisySolver(object):
         return adjoint
 
     def get_laplacian(self, movie):
-        lap = core.get_laplacian(
+        lap = noisy_core.get_laplacian(
             self.diffusion.tensor_ratio,
             np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
             np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
@@ -171,7 +171,7 @@ class NoisySolver(object):
         return laplacian
 
     def adjoint_angle_derivative(self, forward, adjoint):
-        gradient = core.adjoint_angle_derivative(
+        gradient = noisy_core.adjoint_angle_derivative(
             self.diffusion.tensor_ratio,
             np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
             np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),

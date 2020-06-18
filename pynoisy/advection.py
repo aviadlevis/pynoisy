@@ -1,7 +1,7 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import core
+import noisy_core
 import xarray as xr
 import pynoisy.utils as utils
 
@@ -27,7 +27,7 @@ def disk(direction='cw', scaling_radius=0.2):
     """
     assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
     direction_value = -1 if direction is 'cw' else 1
-    vx, vy = core.get_disk_velocity(direction_value, scaling_radius)
+    vx, vy = noisy_core.get_disk_velocity(direction_value, scaling_radius)
 
     advection = grid(vx, vy)
     new_attrs = {

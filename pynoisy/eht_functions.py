@@ -194,5 +194,5 @@ def generate_observations(movie, obs_sgra, output_path='.', noise=True):
 
 def load_fits(path):
     image = eh.image.load_fits(path)
-    image = image.regrid_image(image.fovx(), pynoisy.core.get_image_size()[0])
+    image = image.regrid_image(image.fovx(), pynoisy.noisy_core.get_image_size()[0])
     return pynoisy.envelope.grid(data=image.imarr())

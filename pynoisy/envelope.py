@@ -1,7 +1,7 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import core
+import noisy_core
 import xarray as xr
 import pynoisy.utils as utils
 import numpy as np
@@ -83,7 +83,7 @@ def noisy_ring(scaling_radius=0.2):
     scaling_radius: float, default=0.02
         Scales the disk radius with respect to the whole image
     """
-    envelope = grid(core.get_disk_envelope(scaling_radius))
+    envelope = grid(noisy_core.get_disk_envelope(scaling_radius))
     new_attrs = {
         'envelope_model': 'noisy_ring',
         'scaling_radius': scaling_radius

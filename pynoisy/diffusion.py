@@ -1,7 +1,7 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import core
+import noisy_core
 import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
@@ -40,9 +40,9 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
         ratio for the diffusion tensor along the two principal axis.
     """
     diffusion = grid(
-        principle_angle=core.get_disk_angle(opening_angle),
-        correlation_time=core.get_disk_correlation_time(tau, scaling_radius),
-        correlation_length=core.get_disk_correlation_length(scaling_radius, lam),
+        principle_angle=noisy_core.get_disk_angle(opening_angle),
+        correlation_time=noisy_core.get_disk_correlation_time(tau, scaling_radius),
+        correlation_length=noisy_core.get_disk_correlation_length(scaling_radius, lam),
         tensor_ratio=tensor_ratio
     )
     new_attrs = {
@@ -125,8 +125,8 @@ def disk(tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     direction = -1 if direction is 'cw' else 1
 
     diffusion = grid(
-        principle_angle=core.get_disk_angle(-direction * np.pi / 2),
-        correlation_time=core.get_disk_correlation_time(tau, scaling_radius),
+        principle_angle=noisy_core.get_disk_angle(-direction * np.pi / 2),
+        correlation_time=noisy_core.get_disk_correlation_time(tau, scaling_radius),
         correlation_length=np.exp(-0.5 * (utils.get_grid().r / scaling_radius) ** 2),
         tensor_ratio=tensor_ratio
     )

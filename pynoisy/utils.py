@@ -1,4 +1,4 @@
-import core
+import noisy_core
 import matplotlib.pyplot as plt
 import xarray as xr
 import numpy as np
@@ -33,7 +33,7 @@ def slider_select_file(dir, filetype=None):
 
 def get_grid():
     """TODO"""
-    x, y = core.get_xy_grid()
+    x, y = noisy_core.get_xy_grid()
     grid = xr.Dataset(
         coords={'x': x[:, 0], 'y': y[0],
                 'r': (['x', 'y'], np.sqrt(x ** 2 + y ** 2)),
@@ -119,7 +119,7 @@ class noisy_methods(object):
         self._obj = data_array
 
     def get_tensor(self):
-        tensor = core.get_diffusion_tensor(
+        tensor = noisy_core.get_diffusion_tensor(
             self._obj.attrs['tensor_ratio'],
             self._obj.principle_angle.data,
             self._obj.diffusion_coefficient.data
