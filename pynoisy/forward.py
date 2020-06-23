@@ -7,21 +7,29 @@ import noisy_core
 import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
+import warnings
+
 
 class NoisySolver(object):
     """TODO"""
-    def __init__(self, advection, diffusion, forcing_strength=1.0, seed=None):
-        self._advection = advection.copy(deep=True)
-        self._diffusion = diffusion.copy(deep=True)
-        self._params = utils.get_grid()
-        self._params.update({'forcing_strength': forcing_strength,
-                             'seed': None, 'num_frames': noisy_core.get_num_frames()})
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None):
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+        grid = utils.get_grid(nx, ny)
+        resampled_advection = advection.interp_like(grid).bfill(dim='x').ffill(dim='x').bfill(dim='y').ffill(dim='y')
+        resampled_advection.coords.update(grid)
+        resampled_diffusion = diffusion.interp_like(grid).bfill(dim='x').ffill(dim='x').bfill(dim='y').ffill(dim='y')
+        resampled_diffusion.coords.update(grid)
+        self._advection = resampled_advection
+        self._diffusion = resampled_diffusion
+        self._params = grid
+        self._params.update({'forcing_strength': forcing_strength, 'seed': None})
         self._params.attrs = {'solver_type': 'Noisy'}
         self.reseed(seed)
+        warnings.resetwarnings()
 
     def copy(self, deep=True):
         """TODO"""
-        return NoisySolver(
+        return NoisySolver(self.nx, self.ny,
             advection=self.advection.copy(deep=deep), diffusion=self.diffusion.copy(deep=deep),
             forcing_strength=self.forcing_strength, seed=self.seed)
 
@@ -40,7 +48,7 @@ class NoisySolver(object):
         self._diffusion.update(diffusion)
         self._diffusion.attrs = diffusion.attrs
 
-    def run_asymmetric(self, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
+    def run_asymmetric(self, num_frames, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
 
         if seed is not None:
@@ -49,6 +57,7 @@ class NoisySolver(object):
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
         if n_jobs == 1:
             pixels = [noisy_core.run_asymmetric(
+                num_frames, self.nx, self.ny,
                 self.diffusion.tensor_ratio,
                 self.forcing_strength, evolution_length,
                 np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
@@ -60,6 +69,7 @@ class NoisySolver(object):
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
                 delayed(noisy_core.run_asymmetric)(
+                    num_frames, self.nx, self.ny,
                     self.diffusion.tensor_ratio,
                     self.forcing_strength, evolution_length,
                     np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
@@ -70,7 +80,7 @@ class NoisySolver(object):
 
         movie = xr.DataArray(data=pixels,
                              coords={'sample': range(num_samples),
-                                     't': np.linspace(0, evolution_length, self.num_frames),
+                                     't': np.linspace(0, evolution_length, num_frames),
                                      'x': self.params.x, 'y': self.params.y},
                              dims=['sample', 't', 'x', 'y'])
         if num_samples == 1:
@@ -80,22 +90,22 @@ class NoisySolver(object):
             movie.coords['seed'] = ('sample', self.seed + np.arange(num_samples))
         return movie
 
-    def symmetric_source(self, evolution_length=0.1, num_samples=1, seed=None):
+    def symmetric_source(self, num_frames, evolution_length=0.1, num_samples=1, seed=None):
         if seed is not None:
             np.random.seed(seed)
         else:
             np.random.seed(self.seed)
-        source = np.random.randn(num_samples, self.num_frames, *noisy_core.get_image_size()) * self.forcing_strength
+        source = np.random.randn(num_samples, num_frames, self.nx, self.ny) * self.forcing_strength
         movie = xr.DataArray(data=source,
                              coords={'sample': range(num_samples),
-                                     't': np.linspace(0, evolution_length, self.num_frames),
+                                     't': np.linspace(0, evolution_length, num_frames),
                                      'x': self.params.x, 'y': self.params.y},
                              dims=['sample', 't', 'x', 'y'])
         if num_samples == 1:
             movie = movie.squeeze('sample')
         return movie
 
-    def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_samples=1, n_jobs=1, seed=None):
+    def run_symmetric(self, source=None, evolution_length=0.1, verbose=True, num_frames=None, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
 
         if seed is not None:
@@ -103,18 +113,21 @@ class NoisySolver(object):
 
         # Either pre-determined source or randomly sampled from Gaussian distribution
         if source is None:
+            assert num_frames is not None, 'If the source is unspecified, the number of frames should be specified.'
             source_attr = 'random (numpy)'
             np.random.seed(self.seed)
-            source = np.random.randn(num_samples, self.num_frames, *noisy_core.get_image_size()) * self.forcing_strength
+            source = np.random.randn(num_samples, num_frames, self.nx, self.ny) * self.forcing_strength
         else:
             source_attr = 'controlled (input)'
             source_type = type(source)
             if source_type == np.ndarray:
                 source = np.expand_dims(source, 0) if source.ndim==3 else source
                 num_samples = source.shape[0]
+                num_frames = source.shape[1]
             elif source_type == xr.DataArray:
                 source = source.expand_dims('sample') if 'sample' not in source.dims else source
                 num_samples = source.sample.size
+                num_frames = source.t.size
             else:
                 raise AttributeError('Source type ({}) not implemented'.format(source_type))
 
@@ -122,6 +135,7 @@ class NoisySolver(object):
 
         if n_jobs == 1:
             pixels = [noisy_core.run_symmetric(
+                num_frames, self.nx, self.ny,
                 np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
                 evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
@@ -131,16 +145,17 @@ class NoisySolver(object):
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
                 delayed(noisy_core.run_symmetric)(
-                np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
-                evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
-                np.array(self.v, dtype=np.float64, order='C'),
-                np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
-                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
-                np.array(source[i], dtype=np.float64, order='C'), verbose) for i in sample_range)
+                    num_frames, self.nx, self.ny,
+                    np.array(self.diffusion.tensor_ratio, dtype=np.float64, order='C'),
+                    evolution_length, np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
+                    np.array(self.v, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
+                    np.array(source[i], dtype=np.float64, order='C'), verbose) for i in sample_range)
 
         movie = xr.DataArray(data=pixels,
                              coords={'sample': range(num_samples),
-                                     't': np.linspace(0, evolution_length, self.num_frames),
+                                     't': np.linspace(0, evolution_length, num_frames),
                                      'x': self.params.x, 'y': self.params.y},
                              dims=['sample', 't', 'x', 'y'])
 
@@ -160,6 +175,7 @@ class NoisySolver(object):
 
     def get_laplacian(self, movie):
         lap = noisy_core.get_laplacian(
+            movie.shape[0], self.nx, self.ny,
             self.diffusion.tensor_ratio,
             np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
             np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
@@ -169,19 +185,6 @@ class NoisySolver(object):
         )
         laplacian = xr.DataArray(data=lap, coords=movie.coords, dims=movie.dims)
         return laplacian
-
-    def adjoint_angle_derivative(self, forward, adjoint):
-        gradient = noisy_core.adjoint_angle_derivative(
-            self.diffusion.tensor_ratio,
-            np.array(self.diffusion.principle_angle, dtype=np.float64, order='C'),
-            np.array(self.diffusion.diffusion_coefficient, dtype=np.float64, order='C'),
-            np.array(self.v, dtype=np.float64, order='C'),
-            np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
-            np.array(forward, dtype=np.float64, order='C'),
-            np.array(adjoint, dtype=np.float64, order='C')
-        )
-        gradient = xr.DataArray(data=gradient, coords=self.params.coords, dims=self.params.dims)
-        return gradient
 
     def save(self, path):
         self.params.to_netcdf(path, mode='w')
@@ -202,12 +205,16 @@ class NoisySolver(object):
         return self._params
 
     @property
-    def seed(self):
-        return int(self.params.seed)
+    def nx(self):
+        return self.params.x.size
 
     @property
-    def num_frames(self):
-        return int(self.params.num_frames)
+    def ny(self):
+        return self.params.y.size
+
+    @property
+    def seed(self):
+        return int(self.params.seed)
 
     @property
     def forcing_strength(self):

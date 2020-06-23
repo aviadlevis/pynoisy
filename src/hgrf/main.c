@@ -26,7 +26,246 @@
 
 // TODO generalize dimension, set dimension in model
 
-int c_main ()
+int c_main(int nk, int ni, int nj, double* source, double* output_video)
+{
+  int i, j, k;
+
+  int myid, num_procs;
+
+  int pi, pj, pk, npi, npj, npk;
+  double dx0, dx1, dx2;
+  int ilower[3], iupper[3];
+
+  int solver_id;
+  int n_pre, n_post;
+
+  clock_t start_t = clock();
+  clock_t check_t;
+
+  HYPRE_StructGrid    grid;
+  HYPRE_StructStencil stencil;
+  HYPRE_StructMatrix  A;
+  HYPRE_StructVector  b;
+  HYPRE_StructVector  x;
+  HYPRE_StructSolver  solver;
+  HYPRE_StructSolver  precond;
+
+  int num_iterations;
+  double final_res_norm;
+
+  int output, timer;
+
+  char* dir_ptr;
+
+  /* Initialize MPI */
+  MPI_Init(NULL, NULL);
+  MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+  MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+
+  printf("nproc = %d\n", num_procs);
+  printf("myid = %d\n", myid);
+
+  /* Set defaults */
+  npi = 1;
+  npj = 1;
+  npk = 1;                      /* default processor grid is 1 x 1 x N */
+  solver_id = 0;
+  n_pre  = 1;
+  n_post = 1;
+  output = 1;                  /* output data by default */
+  timer  = 0;
+  char* default_dir = ".";     /* output in current directory by default */
+  dir_ptr = default_dir;
+
+  /* Initiialize rng */
+  const gsl_rng_type *T;
+  gsl_rng *rstate;
+  gsl_rng_env_setup();
+  T = gsl_rng_default;
+  rstate = gsl_rng_alloc(T);
+  gsl_rng_set(rstate, model_set_gsl_seed(gsl_rng_default_seed, myid));
+
+
+  /* Set dx0, dx1, dx2 */
+  model_set_spacing(&dx0, &dx1, &dx2, ni, nj, nk, npi, npj, npk);
+
+  /* Figure out processor grid (npi x npj x npk). Processor position
+     indicated by pi, pj, pk. Size of local grid on processor is
+     (ni x nj x nk) */
+
+  pk = myid / (npi * npj);
+  pj = (myid - pk * npi * npj) / npi;
+  pi = myid - pk * npi * npj - pj * npi;
+
+  /* Figure out the extents of each processor's piece of the grid. */
+  ilower[0] = pi * ni;
+  ilower[1] = pj * nj;
+  ilower[2] = pk * nk;
+
+  iupper[0] = ilower[0] + ni - 1;
+  iupper[1] = ilower[1] + nj - 1;
+  iupper[2] = ilower[2] + nk - 1;
+
+  /* Set up and assemble grid */
+  {
+    HYPRE_StructGridCreate(MPI_COMM_WORLD, 3, &grid);
+    HYPRE_StructGridSetExtents(grid, ilower, iupper);
+
+    /* Set periodic boundary conditions of model */
+    int bound_con[3];
+    model_set_periodic(bound_con, ni, nj, nk, npi, npj, npk, 3);
+    HYPRE_StructGridSetPeriodic(grid, bound_con);
+
+    HYPRE_StructGridAssemble(grid);
+  }
+
+  check_t = clock();
+  if ( (myid == 0) && (timer) )
+    printf("Grid initialized: t = %lf\n\n",
+	   (double)(check_t - start_t) / CLOCKS_PER_SEC);
+
+  /* Initialize stencil and Struct Matrix, and set stencil values */
+  model_create_stencil(&stencil, 3);
+
+  HYPRE_StructMatrixCreate(MPI_COMM_WORLD, grid, stencil, &A);
+  HYPRE_StructMatrixInitialize(A);
+
+  model_set_stencil_values(&A, ilower, iupper, ni, nj, nk, pi, pj, pk,
+			   dx0, dx1, dx2);
+
+  check_t = clock();
+  if ( (myid == 0) && (timer) )
+    printf("Stencils values set: t = %lf\n\n",
+	   (double)(check_t - start_t) / CLOCKS_PER_SEC);
+
+  /* Fix boundary conditions and assemble Struct Matrix */
+  model_set_bound(&A, ni, nj, nk, pi, pj, pk, npi, npj, npk, dx0, dx1, dx2);
+
+  HYPRE_StructMatrixAssemble(A);
+
+  check_t = clock();
+  if ( (myid == 0) && (timer) )
+    printf("Boundary conditions set: t = %lf\n\n",
+	   (double)(check_t - start_t) / CLOCKS_PER_SEC);
+
+  /* Set up Struct Vectors for b and x */
+  {
+    int    nvalues = ni * nj * nk;
+
+
+    HYPRE_StructVectorCreate(MPI_COMM_WORLD, grid, &b);
+    HYPRE_StructVectorCreate(MPI_COMM_WORLD, grid, &x);
+
+    HYPRE_StructVectorInitialize(b);
+    HYPRE_StructVectorInitialize(x);
+
+    HYPRE_StructVectorSetBoxValues(b, ilower, iupper, source);
+
+    for (i = 0; i < nvalues; i ++)
+      source[i] = 0.0;
+    HYPRE_StructVectorSetBoxValues(x, ilower, iupper, source);
+
+    HYPRE_StructVectorAssemble(b);
+    HYPRE_StructVectorAssemble(x);
+  }
+
+  check_t = clock();
+  if ( (myid == 0) && (timer) )
+    printf("Struct vector assembled: t = %lf\n\n",
+	   (double)(check_t - start_t) / CLOCKS_PER_SEC);
+
+  /* Set up and use a struct solver */
+  if (solver_id == 0) {
+    HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
+    HYPRE_StructPCGSetMaxIter(solver, 50 );
+    HYPRE_StructPCGSetTol(solver, 1.0e-06 );
+    HYPRE_StructPCGSetTwoNorm(solver, 1 );
+    HYPRE_StructPCGSetRelChange(solver, 0 );
+    HYPRE_StructPCGSetPrintLevel(solver, 2 ); /* print each CG iteration */
+    HYPRE_StructPCGSetLogging(solver, 1);
+
+    /* Use symmetric SMG as preconditioner */
+    HYPRE_StructSMGCreate(MPI_COMM_WORLD, &precond);
+    HYPRE_StructSMGSetMemoryUse(precond, 0);
+    HYPRE_StructSMGSetMaxIter(precond, 1);
+    HYPRE_StructSMGSetTol(precond, 0.0);
+    HYPRE_StructSMGSetZeroGuess(precond);
+    HYPRE_StructSMGSetNumPreRelax(precond, 1);
+    HYPRE_StructSMGSetNumPostRelax(precond, 1);
+
+    /* Set the preconditioner and solve */
+    HYPRE_StructPCGSetPrecond(solver, HYPRE_StructSMGSolve,
+			      HYPRE_StructSMGSetup, precond);
+    HYPRE_StructPCGSetup(solver, A, b, x);
+    HYPRE_StructPCGSolve(solver, A, b, x);
+
+    /* Get some info on the run */
+    HYPRE_StructPCGGetNumIterations(solver, &num_iterations);
+    HYPRE_StructPCGGetFinalRelativeResidualNorm(solver, &final_res_norm);
+
+    /* Clean up */
+    HYPRE_StructPCGDestroy(solver);
+  }
+
+  if (solver_id == 1) {
+    HYPRE_StructSMGCreate(MPI_COMM_WORLD, &solver);
+    HYPRE_StructSMGSetMemoryUse(solver, 0);
+    HYPRE_StructSMGSetMaxIter(solver, 50);
+    HYPRE_StructSMGSetTol(solver, 1.0e-06);
+    HYPRE_StructSMGSetRelChange(solver, 0);
+    HYPRE_StructSMGSetNumPreRelax(solver, n_pre);
+    HYPRE_StructSMGSetNumPostRelax(solver, n_post);
+    /* Logging must be on to get iterations and residual norm info below */
+    // TODO fix SMG logging
+    HYPRE_StructSMGSetPrintLevel(solver, 2);
+    HYPRE_StructSMGSetLogging(solver, 1);
+
+    /* Setup and solve */
+    HYPRE_StructSMGSetup(solver, A, b, x);
+    HYPRE_StructSMGSolve(solver, A, b, x);
+
+    /* Get some info on the run */
+    HYPRE_StructSMGGetNumIterations(solver, &num_iterations);
+    HYPRE_StructSMGGetFinalRelativeResidualNorm(solver, &final_res_norm);
+
+    /* Clean up */
+    HYPRE_StructSMGDestroy(solver);
+  }
+
+  check_t = clock();
+  if ( (myid == 0) && (timer) )
+    printf("Solver finished: t = %lf\n\n",
+	   (double)(check_t - start_t) / CLOCKS_PER_SEC);
+
+  if (myid == 0) {
+    printf("\n");
+    printf("Iterations = %d\n", num_iterations);
+    printf("Final Relative Residual Norm = %g\n", final_res_norm);
+    printf("\n");
+  }
+
+  int nvalues = ni * nj * nk;
+
+  HYPRE_StructVectorGetBoxValues(x, ilower, iupper, output_video);
+
+  /* Free HYPRE memory */
+  HYPRE_StructGridDestroy(grid);
+  HYPRE_StructStencilDestroy(stencil);
+  HYPRE_StructMatrixDestroy(A);
+  HYPRE_StructVectorDestroy(b);
+  HYPRE_StructVectorDestroy(x);
+
+  /* Free GSL rng state */
+  gsl_rng_free(rstate);
+
+  /* Finalize MPI */
+  MPI_Finalize();
+
+  return (0);
+}
+
+
+int c_main_mpi (int argc, char *argv[])
 {
   int i, j, k;
 
@@ -58,18 +297,20 @@ int c_main ()
   char* dir_ptr;
 
   /* Initialize MPI */
-
-  MPI_Init(NULL, NULL);
+  MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &myid);
   MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
 
+  printf("nproc = %d\n", num_procs);
+  printf("myid = %d\n", myid);
+
   /* Set defaults */
-  ni  = 64;                    /* nj and nk are set equal to ni later */
-  nj  = 64;
-  nk  = 100;
-  npi = 1;
-  npj = 1;
-  npk = num_procs;             /* default processor grid is 1 x 1 x N */
+  ni  = 16;                    /* nj and nk are set equal to ni later */
+  nj  = 16;
+  nk  = 20;
+  npi = 4;
+  npj = 4;
+  npk = 5;             /* default processor grid is 1 x 1 x N */
   solver_id = 0;
   n_pre  = 1;
   n_post = 1;

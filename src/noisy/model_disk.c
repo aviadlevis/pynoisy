@@ -32,17 +32,19 @@ double correlation_length(double x,double y,double PARAM_RCH,double PARAM_LAM)
 
 }
 
-void get_correlation_length_image(double correlation_length_image[N][N], double PARAM_RCH, double PARAM_LAM)
+void get_correlation_length_image(int nx, int ny, double* correlation_length_image, double PARAM_RCH, double PARAM_LAM)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     double correlation_length(double x,double y, double PARAM_RCH, double PARAM_LAM);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        correlation_length_image[i][j] = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
+    int k = 0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j,&x,&y);
+        correlation_length_image[k] = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
+        k++;
     }
 }
 
@@ -56,22 +58,24 @@ double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH)
     return( PARAM_TAU * fabs(t) );
 }
 
-void get_correlation_time_image(double correlation_time_image[N][N], double PARAM_TAU, double PARAM_RCH)
+void get_correlation_time_image(int nx, int ny, double* correlation_time_image, double PARAM_TAU, double PARAM_RCH)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     double correlation_time(double x,double y, double PARAM_TAU, double PARAM_RCH);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        correlation_time_image[i][j] = correlation_time(x, y, PARAM_TAU, PARAM_RCH);
+    int k = 0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j,&x,&y);
+        correlation_time_image[k] = correlation_time(x, y, PARAM_TAU, PARAM_RCH);
+        k++;
     }
 }
 
 
-double diffusion_coefficient(double x,double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
+double diffusion_coefficient(double x, double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM)
 {
     double l = correlation_length(x, y, PARAM_RCH, PARAM_LAM);
     double t = correlation_time(x, y, PARAM_TAU, PARAM_RCH);
@@ -80,17 +84,19 @@ double diffusion_coefficient(double x,double y, double PARAM_TAU, double PARAM_R
     return( 2.*K );
 }
 
-void get_diffusion_coefficient(double diffusion_coefficient_image[N][N], double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
+void get_diffusion_coefficient(int nx, int ny, double* diffusion_coefficient_image, double PARAM_TAU, double PARAM_LAM, double PARAM_RCH)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     double diffusion_coefficient(double x, double y, double PARAM_TAU, double PARAM_RCH, double PARAM_LAM);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        diffusion_coefficient_image[i][j] = diffusion_coefficient(x, y, PARAM_TAU, PARAM_RCH, PARAM_LAM);
+    int k = 0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j,&x,&y);
+        diffusion_coefficient_image[k] = diffusion_coefficient(x, y, PARAM_TAU, PARAM_RCH, PARAM_LAM);
+        k++;
     }
 }
 
@@ -131,17 +137,17 @@ double W_Keplerian(double x, double y, double direction, double PARAM_RCH)
 
 /* return advection velocity as a function of position */
 
-void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH)
+void advection_velocity(double x, double y, double* va, double direction, double PARAM_RCH)
 {
     double r,W,q,taper,rmax;
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
     double W_Keplerian(double x, double y, double direction, double PARAM_RCH);
 
-    W = W_Keplerian(x,y, direction, PARAM_RCH);
+    W = W_Keplerian(x, y, direction, PARAM_RCH);
 
     /* taper velocity with bump function */
     r = sqrt(x*x + y*y);
-    rmax = PARAM_FOV/2.;  /* radius where velocity field is turned off */
+    rmax = 1.0/2.;  /* radius where velocity field is turned off */
     q = 1. - r*r/(rmax*rmax);
     taper = (r >= rmax) ? 0. : exp(-1./q) ;
     W = W*taper;
@@ -151,17 +157,18 @@ void advection_velocity(double x, double y, double va[2], double direction, doub
 }
 
 /* return advection velocity for the whole image */
-void get_advection_velocity_image(double velocity[N][N][2], double direction, double PARAM_RCH)
+void get_advection_velocity_image(int nx, int ny, double* velocity, double direction, double PARAM_RCH)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     void advection_velocity(double x, double y, double va[2], double direction, double PARAM_RCH);
-
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        advection_velocity(x, y, velocity[i][j], direction, PARAM_RCH);
+    int k = 0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j,&x,&y);
+        advection_velocity(x, y, &velocity[k], direction, PARAM_RCH);
+        k = k+2;
     }
 }
 
@@ -178,17 +185,19 @@ double phi_func(double x, double y, double opening_angle)
 }
 
 /* return diffusion tensor principal angle for the whole image */
-void principal_angle_image(double angle[N][N], double opening_angle)
+void principal_angle_image(int nx, int ny, double* angle, double opening_angle)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     double phi_func(double x, double y, double opening_angle);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        angle[i][j] = phi_func(x, y, opening_angle);
+    int k=0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j,&x,&y);
+        angle[k] = phi_func(x, y, opening_angle);
+        k++;
     }
 }
 
@@ -207,49 +216,51 @@ double envelope(double x, double y, double PARAM_RCH)
 }
 
 /* return image envelope */
-void get_envelope_image(double envelope_image[N][N], double PARAM_RCH)
+void get_envelope_image(int nx, int ny, double* envelope_image, double PARAM_RCH)
 {
     int i,j;
     double x,y;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
     double envelope(double x, double y, double PARAM_RCH);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x,&y);
-        envelope_image[i][j] = envelope(x, y, PARAM_RCH);
+    int k=0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx, ny, i, j, &x, &y);
+        envelope_image[k] = envelope(x, y, PARAM_RCH);
+        k++;
     }
 }
 
 /* noise model */
-void noise_model(double del_noise[N][N], double dt, double PARAM_EPS, gsl_rng* r)
+void noise_model(int nx, int ny,double del_noise[nx][ny], double dt, double PARAM_EPS, gsl_rng* r)
 {
     int i,j;
 
     /* white noise in space and time model */
 #if 1
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
         del_noise[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r, 1.0);
     }
 #endif
 
 #if 0
     /* white noise in space, static in time model */
-    static double save_noise[N][N];
+    static double save_noise[nx][ny];
     if(first_call) {
         r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
         gsl_rng_set(r, 0);
 
-        for(i=0;i<N;i++)
-        for(j=0;j<N;j++) {
+        for(i=0;i<nx;i++)
+        for(j=0;j<ny;j++) {
             save_noise[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r,1.0);
         }
 
         first_call = 0;
     }
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
         del_noise[i][j] = save_noise[i][j];
     }
 #endif

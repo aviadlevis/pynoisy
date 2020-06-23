@@ -8,7 +8,7 @@ import numpy as np
 
 
 def grid(data):
-    _grid = utils.get_grid()
+    _grid = utils.get_grid(*data.shape)
     envelope = xr.DataArray(
         name='envelope',
         data=np.array(data, dtype=np.float64, order='C'),
@@ -19,12 +19,12 @@ def grid(data):
     return envelope
 
 
-def ring(inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
+def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
          photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, amplitude=0.05):
     """
     TODO
     """
-    r = utils.get_grid().r.data
+    r = utils.get_grid(nx, ny).r.data
 
     zone0_radius = inner_radius
     zone1_radius = inner_radius + photon_ring_thickness
@@ -73,7 +73,7 @@ def ring(inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_
     return envelope
 
 
-def noisy_ring(scaling_radius=0.2):
+def noisy_ring(nx, ny, scaling_radius=0.2):
     """
     The envelope function multiplies the random fields to create synthetic images.
     The disk envelope function is a specific envelope defined by the src/model_disk.c
@@ -83,7 +83,7 @@ def noisy_ring(scaling_radius=0.2):
     scaling_radius: float, default=0.02
         Scales the disk radius with respect to the whole image
     """
-    envelope = grid(noisy_core.get_disk_envelope(scaling_radius))
+    envelope = grid(noisy_core.get_disk_envelope(nx, ny, scaling_radius))
     new_attrs = {
         'envelope_model': 'noisy_ring',
         'scaling_radius': scaling_radius
@@ -112,11 +112,11 @@ def gaussian(std=0.2, fwhm=None):
     return envelope
 
 
-def disk(radius=0.2, decay=20):
+def disk(nx, ny, radius=0.2, decay=20):
     """
     TODO
     """
-    r = utils.get_grid().r
+    r = utils.get_grid(nx, ny).r
     data = np.ones_like(r)
     data[r >= .95 * radius] = 0
     exponential_decay = np.exp(-decay * (r - .95 * radius))

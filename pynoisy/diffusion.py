@@ -7,7 +7,9 @@ import xarray as xr
 import pynoisy.utils as utils
 
 def grid(principle_angle, correlation_time, correlation_length, tensor_ratio):
-    _grid = utils.get_grid()
+    assert principle_angle.shape == correlation_time.shape  == correlation_length.shape, \
+        'shapes of (principle_angle, correlation_time, correlation_length) have to match.'
+    _grid = utils.get_grid(*principle_angle.shape)
     diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
     diffusion = xr.Dataset(
         data_vars={
@@ -22,7 +24,7 @@ def grid(principle_angle, correlation_time, correlation_length, tensor_ratio):
     )
     return diffusion
 
-def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_radius=0.2):
+def ring(nx, ny, tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_radius=0.2):
     """
     TODO
 
@@ -40,9 +42,9 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
         ratio for the diffusion tensor along the two principal axis.
     """
     diffusion = grid(
-        principle_angle=noisy_core.get_disk_angle(opening_angle),
-        correlation_time=noisy_core.get_disk_correlation_time(tau, scaling_radius),
-        correlation_length=noisy_core.get_disk_correlation_length(scaling_radius, lam),
+        principle_angle=noisy_core.get_disk_angle(nx, ny, opening_angle),
+        correlation_time=noisy_core.get_disk_correlation_time(nx, ny, tau, scaling_radius),
+        correlation_length=noisy_core.get_disk_correlation_length(nx, ny, scaling_radius, lam),
         tensor_ratio=tensor_ratio
     )
     new_attrs = {
@@ -55,7 +57,7 @@ def ring(tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_
     diffusion.attrs.update(new_attrs)
     return diffusion
 
-def multivariate_gaussian(length_scale=0.1, tensor_ratio=0.1, max_diffusion_coef=1.0, max_correlation_time=1.0):
+def multivariate_gaussian(nx, ny, length_scale=0.1, tensor_ratio=0.1, max_diffusion_coef=1.0, max_correlation_time=1.0):
     """
     TODO
 

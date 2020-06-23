@@ -1,0 +1,22 @@
+{
+  "nx": {
+    "default_value": 64,
+    "description": "Size of image in horizontal direction.  Solution time scales as (nx*ny)^2."
+  },
+   "ny": {
+    "default_value": 64,
+    "description": "Size of image in horizontal direction.  Solution time scales as (nx*ny)^2."
+  },
+  "nt": {
+    "default_value": 50,
+    "description": "Number of video frames."
+  },
+  "small": {
+    "default_value": 1.e-10,
+    "description": "Small number for numericla considirations."
+  },
+  "fov": {
+    "default_value": 1.0,
+    "description": "Field of view (1.0 for unitless fov)"
+  }
+}

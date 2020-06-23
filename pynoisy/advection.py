@@ -6,7 +6,8 @@ import xarray as xr
 import pynoisy.utils as utils
 
 def grid(vx, vy):
-    _grid = utils.get_grid()
+    assert vx.shape == vy.shape, 'vx.shape doesnt match vy.shape'
+    _grid = utils.get_grid(*vx.shape)
     advection = xr.Dataset(
         data_vars={'vx': (_grid.dims, vx), 'vy': (_grid.dims, vy)},
         coords=_grid.coords,
@@ -14,7 +15,7 @@ def grid(vx, vy):
     )
     return advection
 
-def disk(direction='cw', scaling_radius=0.2):
+def disk(nx, ny, direction='cw', scaling_radius=0.2):
     """
     TODO
 
@@ -27,8 +28,7 @@ def disk(direction='cw', scaling_radius=0.2):
     """
     assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
     direction_value = -1 if direction is 'cw' else 1
-    vx, vy = noisy_core.get_disk_velocity(direction_value, scaling_radius)
-
+    vx, vy = noisy_core.get_disk_velocity(nx, ny, direction_value, scaling_radius)
     advection = grid(vx, vy)
     new_attrs = {
         'advection_model': 'disk',

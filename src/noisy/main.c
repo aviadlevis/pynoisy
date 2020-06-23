@@ -24,6 +24,7 @@ CFG 22 Dec 2019
 #include "noisy.h"
 
 int main_asymmetric(
+    int nt, int nx, int ny,
     double PARAM_RAT,
     double PARAM_EPS,
     double tf,
@@ -36,38 +37,40 @@ int main_asymmetric(
     int seed
     )
 {
-    static double _del[N][N];
-
-    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
-        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
+    void grid_function_calc(int nx, int ny, double F_coeff_gradx[nx][ny][4], double F_coeff_grady[nx][ny][4],
+        double v[nx][ny][4][2], double T[nx][ny], double *Kmax, double *Vmax,
         double PARAM_RAT, double* principal_angle_image, double* advection_velocity_image,
         double* diffusion_coefficient_image, double* correlation_time_image);
-    void evolve_diffusion(double _del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
+    void evolve_diffusion(int nx, int ny, double _del[nx][ny], double F_coeff_gradx[nx][ny][4], double F_coeff_grady[nx][ny][4],
         double dt);
-    void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
-    void evolve_decay(double _del[N][N], double T[N][N], double dt);
-    void evolve_noise(double del[N][N], double dt, double PARAM_EPS, gsl_rng* r);
+    void evolve_advection(int nx, int ny, double _del[nx][ny], double v[nx][ny][4][2], double dt);
+    void evolve_decay(int nx, int ny, double _del[nx][ny], double T[nx][ny], double dt);
+    void evolve_noise(int nx, int ny, double del[nx][ny], double dt, double PARAM_EPS, gsl_rng* r);
 
-    double dx = PARAM_FOV/N;
-    double dy = PARAM_FOV/N;
+    double dx = 1.0/nx;
+    double dy = 1.0/ny;
 
     /* correlation length l = sqrt(K*T) */
     /* correlation time is t = T */
     /* so diffusion coefficient is l^2/t */
 
     int i,j ;
-    double Dtl = tf / (double) NUM_IMAGES;   /* image file output cadence */
+    double Dtl = tf / (double) nt;   /* image file output cadence */
 
     /* calculate some grid functions */
-    static double v[N][N][4][2];
+    double _del[nx][ny];
+    double T[nx][ny];
+    double v[nx][ny][4][2];
+    double F_coeff_gradx[nx][ny][4];
+    double F_coeff_grady[nx][ny][4];
+    memset(F_coeff_gradx, 0, sizeof(double) * nx * ny);
+    memset(F_coeff_grady, 0, sizeof(double) * nx * ny);
+
     double Kmax = 0.;
     double Vmax = 0.;
-    static double T[N][N];
-    double F_coeff_gradx[N][N][4] = {{{0.}}};
-    double F_coeff_grady[N][N][4] = {{{0.}}};
 
 
-    grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
+    grid_function_calc(nx, ny, F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
         PARAM_RAT, principal_angle_image, advection_velocity_image,
         diffusion_coefficient_image, correlation_time_image);
 
@@ -102,30 +105,10 @@ int main_asymmetric(
         fprintf(stderr,"seed = %d \n", seed);
     }
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        /*
-        ij_to_xy(i,j,&x,&y);
-        _del[i][j] = exp(-0.5*(x*x + y*y)/sigsq)/(2.*M_PI*sigsq) ;
-        _del[i][j] = PARAM_EPS*gsl_ran_gaussian_ziggurat(r,1.0);
-        */
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
         _del[i][j] = 0.;
     }
-    /*
-    double delavg;
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ip = (i+N+1)%N ;
-        im = (i+N-1)%N ;
-        jp = (j+N+1)%N ;
-        jm = (j+N-1)%N ;
-        delavg = 0.25*(_del[ip][j] + _del[i][jp] + _del[im][j] + _del[i][jm]);
-        ddel[i][j] = delavg;
-    }
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++)
-        _del[i][j] = ddel[i][j];
-    */
 
 
     int n = 0;
@@ -137,22 +120,22 @@ int main_asymmetric(
     while(t < tf){
 
          /* operator split */
-        evolve_noise(_del, dt, PARAM_EPS, r);
-        evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
-        evolve_advection(_del, v, dt);
-        evolve_decay(_del, T, dt);
+        evolve_noise(nx, ny, _del, dt, PARAM_EPS, r);
+        evolve_diffusion(nx, ny, _del, F_coeff_gradx, F_coeff_grady, dt);
+        evolve_advection(nx, ny, _del, v, dt);
+        evolve_decay(nx, ny, _del, T, dt);
 
         /* periodically execute diagnostics */
         if(t > tl) {
             /* check rms and output  random field */
             rms = 0.;
-            for(i=0;i<N;i++)
-            for(j=0;j<N;j++) {
+            for(i=0;i<nx;i++)
+            for(j=0;j<ny;j++) {
                 rms += _del[i][j]*_del[i][j];
                 output_video[n] = _del[i][j];
                 n++;
             }
-            rms = sqrt(rms)/N;
+            rms = sqrt(rms)/sqrt(nx*ny);
 
             if (verbose) {
                 fprintf(stderr,"%lf %lf\n",t, rms);
@@ -166,18 +149,11 @@ int main_asymmetric(
 
     /* Free GSL rng state */
     gsl_rng_free(r);
-
-    /*
-    FILE *fp = fopen("noisy.out", "w");
-    if(fp == NULL) exit(1);
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++)
-        fprintf(fp,"%d %d %lf\n",i,j,_del[i][j]);
-    */
 }
 
 
 int main_symmetric(
+    int nt, int nx, int ny,
     double PARAM_RAT,
     double tf,
     double* principal_angle_image,
@@ -189,38 +165,38 @@ int main_symmetric(
     bool verbose
     )
 {
-    static double _del[N][N];
-
-    void grid_function_calc(double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
-        double v[N][N][4][2], double T[N][N], double *Kmax, double *Vmax,
+    void grid_function_calc(int nx, int ny, double F_coeff_gradx[nx][ny][4], double F_coeff_grady[nx][ny][4],
+        double v[nx][ny][4][2], double T[nx][ny], double *Kmax, double *Vmax,
         double PARAM_RAT, double* principal_angle_image, double* advection_velocity_image,
         double* diffusion_coefficient_image, double* correlation_time_image);
-    void evolve_diffusion(double _del[N][N], double F_coeff_gradx[N][N][4], double F_coeff_grady[N][N][4],
+    void evolve_diffusion(int nx, int ny, double _del[nx][ny], double F_coeff_gradx[nx][ny][4], double F_coeff_grady[nx][ny][4],
         double dt);
-    void evolve_advection(double _del[N][N], double v[N][N][4][2], double dt);
-    void evolve_decay(double _del[N][N], double T[N][N], double dt);
-    void evolve_source(double del[N][N], double dt, double* source);
+    void evolve_advection(int nx, int ny, double _del[nx][ny], double v[nx][ny][4][2], double dt);
+    void evolve_decay(int nx, int ny, double _del[nx][ny], double T[nx][ny], double dt);
+    void evolve_source(int nx, int ny, double del[nx][ny], double dt, double* source);
 
-    double dx = PARAM_FOV/N;
-    double dy = PARAM_FOV/N;
+    double dx = 1.0/nx;
+    double dy = 1.0/ny;
 
     /* correlation length l = sqrt(K*T) */
     /* correlation time is t = T */
     /* so diffusion coefficient is l^2/t */
 
     int i,j ;
-    double Dtl = tf / (double) NUM_IMAGES;   /* image file output cadence */
+    double Dtl = tf / (double) nt;   /* image file output cadence */
 
     /* calculate some grid functions */
-    static double v[N][N][4][2];
+    double _del[nx][ny];
+    double T[nx][ny];
+    double v[nx][ny][4][2];
+    double F_coeff_gradx[nx][ny][4];
+    double F_coeff_grady[nx][ny][4];
+    memset(F_coeff_gradx, 0, sizeof(double) * nx * ny);
+    memset(F_coeff_grady, 0, sizeof(double) * nx * ny);
     double Kmax = 0.;
     double Vmax = 0.;
-    static double T[N][N];
-    double F_coeff_gradx[N][N][4] = {{{0.}}};
-    double F_coeff_grady[N][N][4] = {{{0.}}};
 
-
-    grid_function_calc(F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
+    grid_function_calc(nx, ny, F_coeff_gradx, F_coeff_grady, v, T, &Kmax, &Vmax,
         PARAM_RAT, principal_angle_image, advection_velocity_image,
         diffusion_coefficient_image, correlation_time_image);
 
@@ -249,8 +225,8 @@ int main_symmetric(
     gsl_rng* r;
     r = gsl_rng_alloc(gsl_rng_mt19937); /* Mersenne twister */
     gsl_rng_set(r, 0);
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
         _del[i][j] = 0.;
     }
 
@@ -263,22 +239,22 @@ int main_symmetric(
     while(t <= tf){
 
          /* operator split */
-        evolve_source(_del, dt / Dtl, &source[n]);
-        evolve_diffusion(_del, F_coeff_gradx, F_coeff_grady, dt);
-        evolve_advection(_del, v, dt);
-        evolve_decay(_del, T, dt);
+        evolve_source(nx, ny, _del, dt / Dtl, &source[n]);
+        evolve_diffusion(nx, ny, _del, F_coeff_gradx, F_coeff_grady, dt);
+        evolve_advection(nx, ny, _del, v, dt);
+        evolve_decay(nx, ny, _del, T, dt);
 
         /* periodically execute diagnostics */
         if(t > tl) {
             /* check rms and output  random field */
             rms = 0.;
-            for(i=0;i<N;i++)
-            for(j=0;j<N;j++) {
+            for(i=0;i<nx;i++)
+            for(j=0;j<ny;j++) {
                 rms += _del[i][j]*_del[i][j] * Dtl;
                 output_video[n] = _del[i][j];
                 n++;
             }
-            rms = sqrt(rms)/N;
+            rms = sqrt(rms)/sqrt(nx*ny);
 
             if (verbose) {
                 fprintf(stderr,"%lf %lf\n",t, rms);
@@ -293,55 +269,56 @@ int main_symmetric(
     if(t > tl) {
         /* check rms and output  random field */
         rms = 0.;
-        for(i=0;i<N;i++)
-        for(j=0;j<N;j++) {
+        for(i=0;i<nx;i++)
+        for(j=0;j<ny;j++) {
             rms += _del[i][j]*_del[i][j] * Dtl;
             output_video[n] = _del[i][j];
             n++;
         }
-        rms = sqrt(rms)/N;
+        rms = sqrt(rms)/sqrt(nx*ny);
 
         if (verbose) {
             fprintf(stderr,"%lf %lf\n",t, rms);
         }
     }
-
-
 }
 
 
 
 /* return the coordinates of a zone center */
 
-void ij_to_xy(int i, int j, double *x, double *y)
+void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y)
 {
-    double dx = PARAM_FOV/N;
-    double dy = PARAM_FOV/N;
+    double dx = 1.0/nx;
+    double dy = 1.0/ny;
 
-    *x = (i - N/2)*dx ;
-    *y = (j - N/2)*dy ;
+    *x = (i - nx/2)*dx ;
+    *y = (j - ny/2)*dy ;
 }
 
 /* return image coordinates */
-void xy_image(double x[N][N], double y[N][N])
+void xy_image(int nx, int ny, double* x, double* y)
 {
     int i,j;
-    void ij_to_xy(int i, int j, double *x, double *y);
+    void ij_to_xy(int nx, int ny, int i, int j, double *x, double *y);
 
-    for(i=0;i<N;i++)
-    for(j=0;j<N;j++) {
-        ij_to_xy(i,j,&x[i][j],&y[i][j]);
+    int k = 0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        ij_to_xy(nx,ny,i,j, &x[k],&y[k]);
+        k++;
     }
 
 }
 
 /* transform random field into fake image */
-void apply_envelope(double _del[N][N], double fake_image[N][N], double* envelope_image, double PARAM_AMP)
+void apply_envelope(int nx, int ny, double* _del, double* fake_image, double* envelope_image, double PARAM_AMP)
 {
-    int i,j, k;
-    for(i=0;i<N;i++) 
-    for(j=0;j<N;j++) {
-        fake_image[i][j] = envelope_image[k]*exp(-PARAM_AMP*_del[i][j]);
+    int i,j;
+    int k=0;
+    for(i=0;i<nx;i++)
+    for(j=0;j<ny;j++) {
+        fake_image[k] = envelope_image[k]*exp(-PARAM_AMP*_del[k]);
         k++;
     }
 }

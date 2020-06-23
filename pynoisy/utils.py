@@ -25,15 +25,14 @@ def slider_select_file(dir, filetype=None):
         return paths[i]
 
     filetype = '*' if filetype is None else '*.' + filetype
-    paths = [str(path) for path in Path(dir).rglob('*.fits')]
-    names = [path.name for path in Path(dir).rglob('*.fits')]
+    paths = [str(path) for path in Path(dir).rglob('{}'.format(filetype))]
     file = interactive(select_path, i=(0, len(paths)-1), paths=fixed(paths));
     display(file)
     return file
 
-def get_grid():
+def get_grid(nx, ny):
     """TODO"""
-    x, y = noisy_core.get_xy_grid()
+    x, y = noisy_core.get_xy_grid(nx, ny)
     grid = xr.Dataset(
         coords={'x': x[:, 0], 'y': y[0],
                 'r': (['x', 'y'], np.sqrt(x ** 2 + y ** 2)),

@@ -23,7 +23,6 @@ extensions = [
                       '/usr/lib/x86_64-linux-gnu/openmpi/include/', '/home/aviad/anaconda3/envs/eht/include/'],
         libraries=['gsl', 'blas', 'mpi', 'hdf5', 'HYPRE'],
         library_dirs=['/usr/lib/x86_64-linux-gnu/openmpi/lib/', '/home/aviad/Code/hypre/src/hypre/lib/'],
-        depends=['src/hgrf/param.h', 'src/hgrf/model.h', 'src/hgrf/hdf5_utils.h'],
     )
 ]
 
