@@ -3,7 +3,7 @@ TODO: Some documentation and general description goes here.
 """
 import xarray as xr
 import numpy as np
-import noisy_core
+import noisy_core, hgrf_core
 import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -232,3 +232,93 @@ class NoisySolver(object):
     def v(self):
         return np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
+
+class HGRFSolver(object):
+    def __init__(self, nx, ny, solver_type='PCG', forcing_strength=1.0, seed=None):
+        self._solver_list = ['PCG', 'SMG']
+        assert solver_type in self._solver_list, 'Not supported solver type: {}'.format(solver_type)
+        self._solver_id = self._solver_list.index(solver_type)
+        self._params = utils.get_grid(nx, ny)
+        self._params.update({'solver_type': solver_type, 'forcing_strength': forcing_strength, 'seed': None})
+        self._params.attrs = {'solver_type': 'HGRF'}
+        self.reseed(seed)
+        hgrf_core.init_mpi()
+
+    def reseed(self, seed=None):
+        seed = np.random.randint(0, 32767) if seed is None else seed
+        self._params['seed'] = seed
+        print('Setting solver seed to: {}'.format(self.seed), end='\r')
+
+    def run(self, maxiter, evolution_length=0.1,
+            source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None):
+        """TODO"""
+        verbose = int(verbose)
+        if seed is not None:
+            self.reseed(seed)
+
+        # Either pre-determined source or randomly sampled from Gaussian distribution
+        if source is None:
+            assert num_frames is not None, 'If the source is unspecified, the number of frames should be specified.'
+            source_attr = 'random (numpy)'
+            np.random.seed(self.seed)
+            source = np.random.randn(num_samples, num_frames, self.nx, self.ny) * self.forcing_strength
+        else:
+            source_attr = 'controlled (input)'
+            source_type = type(source)
+            if source_type == np.ndarray:
+                source = np.expand_dims(source, 0) if source.ndim == 3 else source
+                num_samples = source.shape[0]
+                num_frames = source.shape[1]
+            elif source_type == xr.DataArray:
+                source = source.expand_dims('sample') if 'sample' not in source.dims else source
+                num_samples = source.sample.size
+                num_frames = source.t.size
+            else:
+                raise AttributeError('Source type ({}) not implemented'.format(source_type))
+
+        sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
+
+        if n_jobs == 1:
+            pixels = [hgrf_core.run(
+                num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
+                np.array(source[i], dtype=np.float64, order='C'),
+                3.0, 3.0, 1.0, 0.1, 0.01
+            ) for i in sample_range]
+        else:
+            pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
+                delayed(hgrf_core.run_symmetric)(
+                    num_frames, self.nx, self.ny,
+                    np.array(source[i], dtype=np.float64, order='C')) for i in sample_range)
+
+        movie = xr.DataArray(data=pixels,
+                             coords={'sample': range(num_samples),
+                                     't': np.linspace(0, evolution_length, num_frames),
+                                     'x': self.params.x, 'y': self.params.y},
+                             dims=['sample', 't', 'x', 'y'])
+
+        movie.attrs['source'] = source_attr
+        movie.attrs['seed'] = self.seed if source_attr == 'random (numpy)' else None
+        if num_samples == 1:
+            movie = movie.squeeze('sample')
+
+        return movie
+
+    @property
+    def params(self):
+        return self._params
+
+    @property
+    def nx(self):
+        return self.params.x.size
+
+    @property
+    def ny(self):
+        return self.params.y.size
+
+    @property
+    def forcing_strength(self):
+        return float(self.params.forcing_strength)
+
+    @property
+    def seed(self):
+        return int(self.params.seed)

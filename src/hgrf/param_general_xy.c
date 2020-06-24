@@ -11,26 +11,33 @@ const char model_name[] = "general_xy";
 const double param_mass    = 1.E6;       /* in solar masses*/
 const double param_mdot    = 1.E-7;      /* in solar masses per year */
 const double param_x0start = 0.;         /* t in terms of M */
-const double param_x0end   = 100.; 
+const double param_x0end   = 100.;
 const double param_x1start = -10.;       /* x in terms of M */
 const double param_x1end   = 10.;
-const double param_x2start = -10.;       /* y in terms of M */  
+const double param_x2start = -10.;       /* y in terms of M */
 const double param_x2end   = 10.;
 
-/* ratio of correlation length to local radius */
+/*
+ratio of correlation length to local radius
 static const double param_lam = 3.;
-/* product of correlation time and local Keplerian frequency */
+
+product of correlation time and local Keplerian frequency
 static const double param_tau = 3.;
-/* ratio of coefficients of temporal vs spatial correlation */
-static const double param_r02 = 0.01;
-/* ratio of coefficients of major and minor axes of spatial correlation */
-static const double param_r12 = 0.1;
-/* cutoff radius */
+
+cutoff radius
 static const double param_rct = 1.;
+
+ratio of coefficients of temporal vs spatial correlation
+static const double param_r02 = 0.01;
+
+ratio of coefficients of major and minor axes of spatial correlation
+static const double param_r12 = 0.1;
+*/
+
 
 double param_env(double raw, double avg_raw, double var_raw,
 		 int i, int j, int k, int ni, int nj, int nk,
-		 int pi, int pj, int pk, double dx0, double dx1, double dx2)
+		 int pi, int pj, int pk, double dx0, double dx1, double dx2, double param_rct)
 {
   double radius, x, y;
 
@@ -56,7 +63,7 @@ static double cutoff(double r, double r0, double fr0, double dfr0, double f0)
   return b * r * r * (a - r) + f0;
 }
 
-static double w_keplerian(double x0, double x1, double x2)
+static double w_keplerian(double x0, double x1, double x2, double param_rct)
 {
   double r = sqrt(x1 * x1 + x2 * x2);
 
@@ -67,7 +74,7 @@ static double w_keplerian(double x0, double x1, double x2)
 		  -1.5 * pow(param_rct, -2.5), 0.8 * pow(param_rct, -1.5));
 }
 
-static double corr_length(double x0, double x1, double x2)
+static double corr_length(double x0, double x1, double x2, double param_rct, double param_lam)
 {
     /* return param_lam; */
   
@@ -80,14 +87,13 @@ static double corr_length(double x0, double x1, double x2)
 		  param_lam, 0.8 * param_lam * param_rct);
 }
 
-static double corr_time(double x0, double x1, double x2)
+static double corr_time(double x0, double x1, double x2, double param_tau, double param_rct)
 {
   /* return param_tau; */
   
   double r = sqrt(x1 * x1 + x2 * x2);
-
   if (r >= param_rct)
-    return 2. * M_PI * param_tau / fabs( w_keplerian(x0, x1, x2) );
+    return 2. * M_PI * param_tau / fabs( w_keplerian(x0, x1, x2, param_rct) );
   else
     return cutoff(r, param_rct,
 		  2. * M_PI * param_tau * pow(param_rct, 1.5),
@@ -95,9 +101,46 @@ static double corr_time(double x0, double x1, double x2)
 		  0.8 * 2. * M_PI * param_tau * pow(param_rct, 1.5) );
 }
 
-static void set_velocity(double* v, double x0, double x1, double x2)
+void get_correlation_length_image(int ni, int nj, double* correlation_length_image, double param_rct, double param_lam)
 {
-  double omega = w_keplerian(x0, x1, x2);
+  void model_set_spacing(double* dx0, double* dx1, double* dx2,
+		       int ni, int nj, int nk, int npi, int npj, int npk);
+  void i_to_xy(int i, int ni, int nj, int nk, int pi, int pj, int pk, int npi, int npj, int npk,
+            double dx0, double dx1, double dx2, double *x0, double *x1, double *x2);
+  int i;
+  int nvalues = ni * nj;
+  double x0, x1, x2;
+  double dx0, dx1, dx2;
+
+  model_set_spacing(&dx0, &dx1, &dx2, ni, nj, 1, 1, 1, 1);
+  for (i = 0; i < nvalues; i++) {
+    i_to_xy(i, ni, nj, 1, 0, 0, 0, 1, 1, 1, dx0, dx1, dx2, &x0, &x1, &x2);
+    correlation_length_image[i] = corr_length(x0, x1, x2, param_rct, param_lam);
+  }
+}
+
+void get_correlation_time_image(int ni, int nj, double* correlation_time_image, double param_tau, double param_rct)
+{
+  void model_set_spacing(double* dx0, double* dx1, double* dx2,
+		       int ni, int nj, int nk, int npi, int npj, int npk);
+  void i_to_xy(int i, int ni, int nj, int nk, int pi, int pj, int pk, int npi, int npj, int npk,
+            double dx0, double dx1, double dx2, double *x0, double *x1, double *x2);
+  int i;
+  int nvalues = ni * nj;
+  double x0, x1, x2;
+  double dx0, dx1, dx2;
+
+  model_set_spacing(&dx0, &dx1, &dx2, ni, nj, 1, 1, 1, 1);
+  for (i = 0; i < nvalues; i++) {
+    i_to_xy(i, ni, nj, 1, 0, 0, 0, 1, 1, 1, dx0, dx1, dx2, &x0, &x1, &x2);
+    correlation_time_image[i] = corr_time(x0, x1, x2, param_tau, param_rct);
+  }
+}
+
+
+static void set_velocity(double* v, double x0, double x1, double x2, double param_rct)
+{
+  double omega = w_keplerian(x0, x1, x2, param_rct);
   v[0] = 0.;
   v[1] = -x2 * omega;
   v[2] = x1 * omega;
@@ -107,12 +150,12 @@ static void set_velocity(double* v, double x0, double x1, double x2)
 }
 
 /* unit vector in direction of spacetime correlation */
-static void set_u0(double* u0, double x0, double x1, double x2)
+static void set_u0(double* u0, double x0, double x1, double x2, double param_rct)
 {
   double psi, theta;
 
   double v[3];
-  set_velocity(v, x0, x1, x2);
+  set_velocity(v, x0, x1, x2, param_rct);
 
   psi = atan( sqrt(v[1] * v[1] + v[2] * v[2]) );
 
@@ -127,7 +170,7 @@ static void set_u0(double* u0, double x0, double x1, double x2)
 }
 
 /* unit vector in direction of spatial correlation */
-static void set_u1(double* u1, double x0, double x1, double x2)
+static void set_u1(double* u1, double x0, double x1, double x2, double param_rct)
 {
   double theta;
 
@@ -138,7 +181,7 @@ static void set_u1(double* u1, double x0, double x1, double x2)
   }
   else {
     theta = atan2(x2, x1) +
-      copysign( -M_PI / 2. + M_PI / 9., w_keplerian(x0, x1, x2) );
+      copysign( -M_PI / 2. + M_PI / 9., w_keplerian(x0, x1, x2, param_rct) );
     /* theta = atan2(1, dx0 * 2. * M_PI * */
     /* 		  cos(x2 * 2. * M_PI / (param_x2end - param_x2start) ) */
     /* 		  / (param_x2end - param_x2start) ); */
@@ -149,20 +192,21 @@ static void set_u1(double* u1, double x0, double x1, double x2)
   }
 }
 
-static void set_h(double h[3][3], double x0, double x1, double x2)
+static void set_h(double h[3][3], double x0, double x1, double x2, double param_tau, double param_lam,
+                  double param_rct, double param_r12, double param_r02)
 {
   int i, j;
   double u0[3], u1[3];
 
-  set_u0(u0, x0, x1, x2);
-  set_u1(u1, x0, x1, x2);
+  set_u0(u0, x0, x1, x2, param_rct);
+  set_u1(u1, x0, x1, x2, param_rct);
   
   double gamm0, gamm1, beta0, beta1;
 
-  gamm0 = param_r02 * corr_time(x0, x1, x2);
-  beta0 = (1. - param_r02) * corr_time(x0, x1, x2);
-  gamm1 = param_r12 * corr_length(x0, x1, x2);
-  beta1 = (1. - param_r12) * corr_length(x0, x1, x2);  
+  gamm0 = param_r02 * corr_time(x0, x1, x2, param_tau, param_rct);
+  beta0 = (1. - param_r02) * corr_time(x0, x1, x2, param_tau, param_rct);
+  gamm1 = param_r12 * corr_length(x0, x1, x2, param_rct, param_lam);
+  beta1 = (1. - param_r12) * corr_length(x0, x1, x2, param_rct, param_lam);
 
   for (i = 0; i < 3; i++) {
     for (j = 0; j < 3; j++) {
@@ -175,7 +219,8 @@ static void set_h(double h[3][3], double x0, double x1, double x2)
 
 /* dh[0][2][1] = dh[0][2]/dx[1] */
 static void set_dh(double dh[][3][3], double x0, double x1, double x2,
-		   double dx0, double dx1, double dx2)
+		   double dx0, double dx1, double dx2, double param_tau, double param_lam, double param_rct,
+		   double param_r12, double param_r02)
 {
   int i, j, k;
 
@@ -183,12 +228,12 @@ static void set_dh(double dh[][3][3], double x0, double x1, double x2,
   
   /* hm[0][2][1] = h(x0 - dx0, x1, x2)[2][1] */
   double hm[3][3][3], hp[3][3][3]; 
-  set_h(hm[0], x0 - dx0, x1, x2);
-  set_h(hp[0], x0 + dx0, x1, x2);
-  set_h(hm[1], x0, x1 - dx1, x2);
-  set_h(hp[1], x0, x1 + dx1, x2);
-  set_h(hm[2], x0, x1, x2 - dx2);
-  set_h(hp[2], x0, x1, x2 + dx2);
+  set_h(hm[0], x0 - dx0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hp[0], x0 + dx0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hm[1], x0, x1 - dx1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hp[1], x0, x1 + dx1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hm[2], x0, x1, x2 - dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hp[2], x0, x1, x2 + dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
 
   for (i = 0; i < 3; i++)
     for (j = 0; j < 3; j++)
@@ -203,12 +248,12 @@ static double ksq(double x0, double x1, double x2)
   // + log(1. + x1 * log(10.) / (2. * M_PI) );
 }
 
-void param_coeff(double* coeff, double x0, double x1, double x2, double dx0,
-		  double dx1, double dx2, int index)
+void param_coeff(double* coeff, double x0, double x1, double x2, double dx0, double dx1, double dx2,
+		  int index, double param_tau, double param_lam, double param_rct, double param_r12, double param_r02)
 {
   double h[3][3], dh[3][3][3];
-  set_h(h, x0, x1, x2);
-  set_dh(dh, x0, x1, x2, dx0, dx1, dx2);
+  set_h(h, x0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_dh(dh, x0, x1, x2, dx0, dx1, dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
   
   /* dy^2 */
   coeff[0] = -h[2][2] / (dx2 * dx2);
@@ -236,26 +281,30 @@ void param_set_source(double* values, gsl_rng* rstate, int ni, int nj, int nk,
 		      int pi, int pj, int pk, int npi, int npj, int npk,
 		      double dx0, double dx1, double dx2)
 {
+  void i_to_xy(int i, int ni, int nj, int nk, int pi, int pj, int pk, int npi, int npj, int npk,
+            double dx0, double dx1, double dx2, double *x0, double *x1, double *x2);
   int i;
   int nvalues = ni * nj * nk;
 
-  double x0, x1, x2, r;
-
-  int gridi, gridj, gridk;
+  double x0, x1, x2;
 
   for (i = 0; i < nvalues; i++) {
-    gridk = i / (ni * nj);
-    gridj = (i - ni * nj * gridk) / ni;
-    gridi = i - ni * nj * gridk + (pi - gridj) * ni;
+    i_to_xy(i, ni, nj, nk, pi, pj, pk, npi, npj, npk, dx0, dx1, dx2, &x0, &x1, &x2);
+    values[i] = gsl_ran_gaussian_ziggurat(rstate, 1.);
+  }
+}
+
+void i_to_xy(int i, int ni, int nj, int nk, int pi, int pj, int pk, int npi, int npj, int npk,
+            double dx0, double dx1, double dx2, double *x0, double *x1, double *x2)
+{
+    int gridk = i / (ni * nj);
+    int gridj = (i - ni * nj * gridk) / ni;
+    int gridi = i - ni * nj * gridk + (pi - gridj) * ni;
     gridj += pj * nj;
     gridk += pk * nk;
 
-    x0 = param_x0start + dx0 + gridk;
-    x1 = param_x1start + dx1 * gridj;
-    x2 = param_x2start + dx2 * gridi;
-
-    r = sqrt(x1 * x1 + x2 * x2);
-    
-    values[i] = /* pow(r, 1.5) * */ gsl_ran_gaussian_ziggurat(rstate, 1.);
-  }
+    *x0 = param_x0start + dx0 + gridk;
+    *x1 = param_x1start + dx1 * gridj;
+    *x2 = param_x2start + dx2 * gridi;
 }
+

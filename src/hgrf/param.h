@@ -14,12 +14,13 @@ extern const double param_x1end;
 extern const double param_x2start;
 extern const double param_x2end;
 
+
 double param_env(double raw, double avg_raw, double var_raw,
 		 int i, int j, int k, int ni, int nj, int nk,
-		 int pi, int pj, int pk, double dx0, double dx1, double dx2);
+		 int pi, int pj, int pk, double dx0, double dx1, double dx2, double param_rct);
 
-void param_coeff(double* coeff, double x0, double x1, double x2, double dx0,
-		 double dx1, double dx2, int index);
+void param_coeff(double* coeff, double x0, double x1, double x2, double dx0, double dx1, double dx2,
+            int index, double param_tau, double param_lam, double param_rct, double param_r12, double param_r02);
 
 void param_set_source(double* values, gsl_rng* rstate, int ni, int nj, int nk,
 		      int pi, int pj, int pk, int npi, int npj, int npk,

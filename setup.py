@@ -18,7 +18,7 @@ extensions = [
     Extension(
         'hgrf_core',
         sources=['src/hgrf/hgrf.pyx', 'src/hgrf/hdf5_utils.c',
-                 'src/hgrf/model_general_xy.c', 'src/hgrf/param_general_xy.c'],
+                 'src/hgrf/model_general_xy.c'],
         include_dirs=[numpy.get_include(), '/home/aviad/Code/hypre/src/hypre/include/',
                       '/usr/lib/x86_64-linux-gnu/openmpi/include/', '/home/aviad/anaconda3/envs/eht/include/'],
         libraries=['gsl', 'blas', 'mpi', 'hdf5', 'HYPRE'],
@@ -26,8 +26,6 @@ extensions = [
     )
 ]
 
-#'/home/aviad/Code/hypre/src/hypre/include/HYPRE_struct_ls.h',
-#                 '/home/aviad/Code/hypre/src/hypre/include/_hypre_utilities.h',
 setup(
     name='pynoisy',
     version='1.1',
