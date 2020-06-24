@@ -37,8 +37,9 @@ void c_end_mpi(){
   MPI_Finalize();
 }
 
-int c_main(int nk, int ni, int nj, int solver_id, int maxiter, int verbose, double* source, double* output_video,
-            double param_tau, double param_lam, double param_rct, double param_r12, double param_r02)
+int c_main(int nk, int ni, int nj, int solver_id, int maxiter, int verbose, double param_rct, double param_r12,
+           double param_r02, double* source, double spatial_angle_image[ni][nk], double correlation_time_image[ni][nk],
+           double correlation_length_image[ni][nk], double* output_video)
 {
   int i, j, k;
 
@@ -129,8 +130,8 @@ int c_main(int nk, int ni, int nj, int solver_id, int maxiter, int verbose, doub
   HYPRE_StructMatrixCreate(MPI_COMM_WORLD, grid, stencil, &A);
   HYPRE_StructMatrixInitialize(A);
 
-  model_set_stencil_values(&A, ilower, iupper, ni, nj, nk, pi, pj, pk,
-			   dx0, dx1, dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  model_set_stencil_values(&A, ilower, iupper, ni, nj, nk, pi, pj, pk, dx0, dx1, dx2,  param_rct, param_r12,
+			               param_r02, spatial_angle_image, correlation_time_image, correlation_length_image);
 
   check_t = clock();
   if ( (myid == 0) && (timer) )

@@ -14,9 +14,9 @@ void model_set_periodic(int* bound, int ni, int nj, int nk,
 void model_create_stencil(HYPRE_StructStencil* stencil, int dim);
 
 void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
-			      int ni, int nj, int nk, int pi, int pj, int pk,
-			      double dx0, double dx1, double dx2, double param_tau,
-			      double param_lam, double param_rct, double param_r12, double param_r02);
+			      int ni, int nj, int nk, int pi, int pj, int pk, double dx0, double dx1, double dx2,
+			      double param_rct, double param_r12, double param_r02, double spatial_angle_image[ni][nj],
+			      double correlation_time_image[ni][nj], double correlation_length_image[ni][nj]);
 
 void model_set_bound(HYPRE_StructMatrix* A, int ni, int nj, int nk,
 		     int pi, int pj, int pk, int npi, int npj, int npk,

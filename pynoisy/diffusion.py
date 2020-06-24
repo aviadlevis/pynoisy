@@ -1,7 +1,7 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import noisy_core
+import noisy_core, hgrf_core
 import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
@@ -108,7 +108,7 @@ def multivariate_gaussian(nx, ny, length_scale=0.1, tensor_ratio=0.1, max_diffus
     diffusion.attrs.update(new_attrs)
     return diffusion
 
-def disk(tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
+def disk(nx, ny, tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     """
     TODO
 
@@ -127,8 +127,8 @@ def disk(tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     direction = -1 if direction is 'cw' else 1
 
     diffusion = grid(
-        principle_angle=noisy_core.get_disk_angle(-direction * np.pi / 2),
-        correlation_time=noisy_core.get_disk_correlation_time(tau, scaling_radius),
+        principle_angle=noisy_core.get_disk_angle(nx, ny, -direction * np.pi / 2),
+        correlation_time=noisy_core.get_disk_correlation_time(nx, ny, tau, scaling_radius),
         correlation_length=np.exp(-0.5 * (utils.get_grid().r / scaling_radius) ** 2),
         tensor_ratio=tensor_ratio
     )
@@ -141,3 +141,39 @@ def disk(tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     }
     diffusion.attrs.update(new_attrs)
     return diffusion
+
+def general_xy(nx, ny, tau=3.0, lam=3.0, spatial_ratio=0.1, temporal_ratio=0.01, scaling_radius=1.0):
+    """
+    TODO
+
+    Parameters
+    ----------
+    tau: float, default=3.0
+        product of correlation time and local Keplerian frequency.
+    lam: float, default=3.0
+        ratio of correlation length to local radius
+    scaling_radius: float, default=1.0
+        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
+    spatial_ratio: float, default=0.1
+        ratio for the diffusion tensor along the major and minor axes of spatial correlation.
+    temporal_ratio: float, default=0.01
+        ratio for the diffusion tensor along the major and minor axes of spatial correlation.
+    """
+    _grid = utils.get_grid(nx, ny)
+    diffusion = xr.Dataset(
+        data_vars={
+            'spatial_angle': (_grid.dims, hgrf_core.get_generalxy_spatial_angle(nx, ny, scaling_radius)),
+            'correlation_time': (_grid.dims, hgrf_core.get_generalxy_correlation_time(nx, ny, tau, scaling_radius)),
+            'correlation_length': (_grid.dims, hgrf_core.get_generalxy_correlation_length(nx, ny, scaling_radius, lam)),
+            'spatial_ratio': spatial_ratio,
+            'temporal_ratio': temporal_ratio,
+            'scaling_radius': scaling_radius
+        },
+        coords=_grid.coords,
+        attrs={'diffusion_model': 'general_xy'}
+    )
+    return diffusion
+
+
+
+

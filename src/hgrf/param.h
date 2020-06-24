@@ -20,7 +20,8 @@ double param_env(double raw, double avg_raw, double var_raw,
 		 int pi, int pj, int pk, double dx0, double dx1, double dx2, double param_rct);
 
 void param_coeff(double* coeff, double x0, double x1, double x2, double dx0, double dx1, double dx2,
-            int index, double param_tau, double param_lam, double param_rct, double param_r12, double param_r02);
+                 double param_rct, double param_r12, double param_r02, double spatial_angle,
+                 double correlation_time, double correlation_length);
 
 void param_set_source(double* values, gsl_rng* rstate, int ni, int nj, int nk,
 		      int pi, int pj, int pk, int npi, int npj, int npk,

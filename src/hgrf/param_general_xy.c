@@ -170,43 +170,59 @@ static void set_u0(double* u0, double x0, double x1, double x2, double param_rct
 }
 
 /* unit vector in direction of spatial correlation */
-static void set_u1(double* u1, double x0, double x1, double x2, double param_rct)
+static double get_spatial_angle(double x0, double x1, double x2, double param_rct)
 {
-  double theta;
+  return atan2(x2, x1) + copysign( -M_PI / 2. + M_PI / 9., w_keplerian(x0, x1, x2, param_rct) );
+}
 
+
+static void set_u1(double* u1, double x0, double x1, double x2, double theta)
+{
   if (x1 == 0 && x2 == 0) {
     u1[0] = 0.;
     u1[1] = 0.;
     u1[2] = 0.;
   }
   else {
-    theta = atan2(x2, x1) +
-      copysign( -M_PI / 2. + M_PI / 9., w_keplerian(x0, x1, x2, param_rct) );
-    /* theta = atan2(1, dx0 * 2. * M_PI * */
-    /* 		  cos(x2 * 2. * M_PI / (param_x2end - param_x2start) ) */
-    /* 		  / (param_x2end - param_x2start) ); */
-    
     u1[0] = 0.;
     u1[1] = cos(theta);
     u1[2] = sin(theta);
   }
 }
 
-static void set_h(double h[3][3], double x0, double x1, double x2, double param_tau, double param_lam,
-                  double param_rct, double param_r12, double param_r02)
+void get_spatial_angle_image(int ni, int nj, double* spatial_angle_image, double param_rct)
+{
+  void model_set_spacing(double* dx0, double* dx1, double* dx2,
+		       int ni, int nj, int nk, int npi, int npj, int npk);
+  void i_to_xy(int i, int ni, int nj, int nk, int pi, int pj, int pk, int npi, int npj, int npk,
+            double dx0, double dx1, double dx2, double *x0, double *x1, double *x2);
+  int i;
+  int nvalues = ni * nj;
+  double x0, x1, x2;
+  double dx0, dx1, dx2;
+
+  model_set_spacing(&dx0, &dx1, &dx2, ni, nj, 1, 1, 1, 1);
+  for (i = 0; i < nvalues; i++) {
+    i_to_xy(i, ni, nj, 1, 0, 0, 0, 1, 1, 1, dx0, dx1, dx2, &x0, &x1, &x2);
+    spatial_angle_image[i] = get_spatial_angle(x0, x1, x2, param_rct);
+  }
+}
+
+static void set_h(double h[3][3], double x0, double x1, double x2, double param_rct,
+                  double param_r12, double param_r02, double spatial_angle, double correlation_time, double correlation_length)
 {
   int i, j;
   double u0[3], u1[3];
 
   set_u0(u0, x0, x1, x2, param_rct);
-  set_u1(u1, x0, x1, x2, param_rct);
+  set_u1(u1, x0, x1, x2, spatial_angle);
   
   double gamm0, gamm1, beta0, beta1;
 
-  gamm0 = param_r02 * corr_time(x0, x1, x2, param_tau, param_rct);
-  beta0 = (1. - param_r02) * corr_time(x0, x1, x2, param_tau, param_rct);
-  gamm1 = param_r12 * corr_length(x0, x1, x2, param_rct, param_lam);
-  beta1 = (1. - param_r12) * corr_length(x0, x1, x2, param_rct, param_lam);
+  gamm0 = param_r02 * correlation_time;
+  beta0 = (1. - param_r02) * correlation_time;
+  gamm1 = param_r12 * correlation_length;
+  beta1 = (1. - param_r12) * correlation_length;
 
   for (i = 0; i < 3; i++) {
     for (j = 0; j < 3; j++) {
@@ -219,8 +235,8 @@ static void set_h(double h[3][3], double x0, double x1, double x2, double param_
 
 /* dh[0][2][1] = dh[0][2]/dx[1] */
 static void set_dh(double dh[][3][3], double x0, double x1, double x2,
-		   double dx0, double dx1, double dx2, double param_tau, double param_lam, double param_rct,
-		   double param_r12, double param_r02)
+		   double dx0, double dx1, double dx2, double param_rct, double param_r12, double param_r02,
+		   double spatial_angle, double correlation_time, double correlation_length)
 {
   int i, j, k;
 
@@ -228,12 +244,12 @@ static void set_dh(double dh[][3][3], double x0, double x1, double x2,
   
   /* hm[0][2][1] = h(x0 - dx0, x1, x2)[2][1] */
   double hm[3][3][3], hp[3][3][3]; 
-  set_h(hm[0], x0 - dx0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_h(hp[0], x0 + dx0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_h(hm[1], x0, x1 - dx1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_h(hp[1], x0, x1 + dx1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_h(hm[2], x0, x1, x2 - dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_h(hp[2], x0, x1, x2 + dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(hm[0], x0 - dx0, x1, x2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_h(hp[0], x0 + dx0, x1, x2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_h(hm[1], x0, x1 - dx1, x2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_h(hp[1], x0, x1 + dx1, x2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_h(hm[2], x0, x1, x2 - dx2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_h(hp[2], x0, x1, x2 + dx2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
 
   for (i = 0; i < 3; i++)
     for (j = 0; j < 3; j++)
@@ -248,12 +264,12 @@ static double ksq(double x0, double x1, double x2)
   // + log(1. + x1 * log(10.) / (2. * M_PI) );
 }
 
-void param_coeff(double* coeff, double x0, double x1, double x2, double dx0, double dx1, double dx2,
-		  int index, double param_tau, double param_lam, double param_rct, double param_r12, double param_r02)
+void param_coeff(double* coeff, double x0, double x1, double x2, double dx0, double dx1, double dx2, double param_rct,
+                 double param_r12,  double param_r02, double spatial_angle, double correlation_time, double correlation_length)
 {
   double h[3][3], dh[3][3][3];
-  set_h(h, x0, x1, x2, param_tau, param_lam, param_rct, param_r12, param_r02);
-  set_dh(dh, x0, x1, x2, dx0, dx1, dx2, param_tau, param_lam, param_rct, param_r12, param_r02);
+  set_h(h, x0, x1, x2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
+  set_dh(dh, x0, x1, x2, dx0, dx1, dx2, param_rct, param_r12, param_r02, spatial_angle, correlation_time, correlation_length);
   
   /* dy^2 */
   coeff[0] = -h[2][2] / (dx2 * dx2);

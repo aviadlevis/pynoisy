@@ -67,8 +67,9 @@ void model_create_stencil(HYPRE_StructStencil* stencil, int dim)
 }
 
 void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
-			      int ni, int nj, int nk, int pi, int pj, int pk,
-			      double dx0, double dx1, double dx2, double param_tau, double param_lam, double param_rct, double param_r12, double param_r02)
+			      int ni, int nj, int nk, int pi, int pj, int pk, double dx0, double dx1, double dx2,
+			      double param_rct, double param_r12, double param_r02, double spatial_angle_image[ni][nj],
+			      double correlation_time_image[ni][nj], double correlation_length_image[ni][nj])
 {
   int i, j;
   int nentries = NSTENCIL;
@@ -97,7 +98,8 @@ void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
     x1 = param_x1start + dx1 * gridj;
     x2 = param_x2start + dx2 * gridi;
     
-    param_coeff(coeff, x0, x1, x2, dx0, dx1, dx2, 10, param_tau, param_lam, param_rct, param_r12, param_r02);
+    param_coeff(coeff, x0, x1, x2, dx0, dx1, dx2, param_rct, param_r12, param_r02, spatial_angle_image[gridi][gridj],
+                correlation_time_image[gridi][gridj], correlation_length_image[gridi][gridj]);
     
     /*0=a, 1=b, 2=c, 3=d, 4=e, 5=f, etc.*/
     /*

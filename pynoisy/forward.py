@@ -232,13 +232,17 @@ class NoisySolver(object):
     def v(self):
         return np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
-
 class HGRFSolver(object):
-    def __init__(self, nx, ny, solver_type='PCG', forcing_strength=1.0, seed=None):
+    def __init__(self, nx, ny, diffusion, solver_type='PCG', forcing_strength=1.0, seed=None):
         self._solver_list = ['PCG', 'SMG']
         assert solver_type in self._solver_list, 'Not supported solver type: {}'.format(solver_type)
+
+        grid = utils.get_grid(nx, ny)
+        resampled_diffusion = diffusion.interp_like(grid).bfill(dim='x').ffill(dim='x').bfill(dim='y').ffill(dim='y')
+        resampled_diffusion.coords.update(grid)
+        self._diffusion = resampled_diffusion
         self._solver_id = self._solver_list.index(solver_type)
-        self._params = utils.get_grid(nx, ny)
+        self._params = grid
         self._params.update({'solver_type': solver_type, 'forcing_strength': forcing_strength, 'seed': None})
         self._params.attrs = {'solver_type': 'HGRF'}
         self.reseed(seed)
@@ -280,16 +284,21 @@ class HGRFSolver(object):
 
         if n_jobs == 1:
             pixels = [hgrf_core.run(
-                num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
+                num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose, self.diffusion.scaling_radius.data,
+                self.diffusion.spatial_ratio.data, self.diffusion.temporal_ratio.data,
                 np.array(source[i], dtype=np.float64, order='C'),
-                3.0, 3.0, 1.0, 0.1, 0.01
-            ) for i in sample_range]
+                np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
+                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
+                np.array(self.diffusion.correlation_length, dtype=np.float64, order='C')) for i in sample_range]
         else:
             pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
-                delayed(hgrf_core.run_symmetric)(
-                    num_frames, self.nx, self.ny,
-                    np.array(source[i], dtype=np.float64, order='C')) for i in sample_range)
-
+                delayed(hgrf_core.run)(
+                    num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose, self.diffusion.scaling_radius.data,
+                    self.diffusion.spatial_ratio.data, self.diffusion.temporal_ratio.data,
+                    np.array(source[i], dtype=np.float64, order='C'),
+                    np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
+                    np.array(self.diffusion.correlation_length, dtype=np.float64, order='C')) for i in sample_range)
         movie = xr.DataArray(data=pixels,
                              coords={'sample': range(num_samples),
                                      't': np.linspace(0, evolution_length, num_frames),
@@ -318,6 +327,10 @@ class HGRFSolver(object):
     @property
     def forcing_strength(self):
         return float(self.params.forcing_strength)
+
+    @property
+    def diffusion(self):
+        return self._diffusion
 
     @property
     def seed(self):
