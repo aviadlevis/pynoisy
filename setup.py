@@ -17,8 +17,7 @@ extensions = [
     ),
     Extension(
         'hgrf_core',
-        sources=['src/hgrf/hgrf.pyx', 'src/hgrf/hdf5_utils.c',
-                 'src/hgrf/model_general_xy.c'],
+        sources=['src/hgrf/hgrf.pyx', 'src/hgrf/hdf5_utils.c'],
         include_dirs=[numpy.get_include(), '/home/aviad/Code/hypre/src/hypre/include/',
                       '/usr/lib/x86_64-linux-gnu/openmpi/include/', '/home/aviad/anaconda3/envs/eht/include/'],
         libraries=['gsl', 'blas', 'mpi', 'hdf5', 'HYPRE'],

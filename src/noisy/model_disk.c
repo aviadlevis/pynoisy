@@ -152,8 +152,8 @@ void advection_velocity(double x, double y, double* va, double direction, double
     taper = (r >= rmax) ? 0. : exp(-1./q) ;
     W = W*taper;
 
-    va[0] = -W*y ;
-    va[1] = W*x ;
+    va[0] = -W*x ;
+    va[1] = W*y ;
 }
 
 /* return advection velocity for the whole image */

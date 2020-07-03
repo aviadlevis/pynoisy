@@ -43,19 +43,19 @@ def parse_arguments():
     return args
 
 def compute_gradient(solver, forward, adjoint, dx=1e-2):
-    principle_angle = solver.diffusion.principle_angle.copy()
+    spatial_angle = solver.diffusion.spatial_angle.copy()
     source = solver.get_laplacian(forward)
     gradient = np.zeros(shape=solver.params.num_unknowns)
     for n, (i, j) in enumerate(zip(*np.where(solver.params.mask))):
-        solver.diffusion.principle_angle[i, j] = principle_angle[i, j] + dx
+        solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j] + dx
         source_ij = solver.get_laplacian(forward) - source
-        solver.diffusion.principle_angle[i, j] = principle_angle[i, j]
+        solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j]
         source_ij = source_ij / dx
         gradient[n] += (adjoint * source_ij).mean()
     return gradient
 
 def set_state(solver, state):
-    solver.diffusion.principle_angle.values[solver.params.mask] = state
+    solver.diffusion.spatial_angle.values[solver.params.mask] = state
 
 # Parse input arguments
 args = parse_arguments()
@@ -89,7 +89,7 @@ initial_state = np.zeros(shape=solver.params.num_unknowns)
 forward_fn = lambda source: solver.run_symmetric(source, verbose=False)
 adjoint_fn = lambda source: solver.run_adjoint(source, verbose=False)
 gradient_fn = lambda forward, adjoint: compute_gradient(solver, forward, adjoint)
-get_state_fn = lambda: solver.diffusion.principle_angle.values[solver.params.mask]
+get_state_fn = lambda: solver.diffusion.spatial_angle.values[solver.params.mask]
 set_state_fn = lambda state: set_state(solver, state)
 
 forward_op = ForwardOperator.krylov(
@@ -121,10 +121,10 @@ else:
 
 # Define callback functions for routine checks/analysis of the state
 writer.average_image('average_frame/measurements', measurements)
-writer.principle_angle('diffusion/true_angle', solver.diffusion.principle_angle, solver.params.mask)
+writer.spatial_angle('diffusion/true_angle', solver.diffusion.spatial_angle, solver.params.mask)
 callback_fn = [
     loss_callback_fn,
-    CallbackFn(lambda: writer.principle_angle('diffusion/estimate_angle', solver.diffusion.principle_angle, solver.params.mask, optimizer.iteration)),
+    CallbackFn(lambda: writer.spatial_angle('diffusion/estimate_angle', solver.diffusion.spatial_angle, solver.params.mask, optimizer.iteration)),
     CallbackFn(lambda: writer.average_image('average_frame/estimate', solver.run_symmetric(verbose=False), optimizer.iteration), ckpt_period=5*60),
     CallbackFn(lambda: optimizer.save_checkpoint(solver, logdir), ckpt_period=1*60*60)
 ]

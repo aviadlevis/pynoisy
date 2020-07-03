@@ -74,7 +74,7 @@ def compare_movie_frames(frames1, frames2, scale='amp'):
             image3 = np.log(np.abs(frames1[i]/frames2[i]))
 
         for ax, img, title, cbar in zip(axes, [image1, image2, image3], titles, cbars):
-            ax.imshow(img)
+            ax.imshow(img.T)
             ax.set_title(title)
             cbar.mappable.set_clim([img.min(), img.max()])
 
@@ -120,30 +120,41 @@ class noisy_methods(object):
     def get_tensor(self):
         tensor = noisy_core.get_diffusion_tensor(
             self._obj.attrs['tensor_ratio'],
-            self._obj.principle_angle.data,
+            self._obj.spatial_angle.data,
             self._obj.diffusion_coefficient.data
         )
         return tensor
 
-    def plot_principal_axis(self, downscale_factor=8):
+    def plot_principal_axis(self, downscale_factor=8, mode='noisy'):
         """TODO"""
-        angle = self._obj.principle_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        x, y = np.meshgrid(angle.x, angle.y, indexing='ij')
-        plt.quiver(x, y, np.cos(angle), np.sin(angle))
+        assert mode in ['noisy', 'hgrf'], "Mode is either noisy or hgrf"
+        angle = self._obj.spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
+        x, y = np.meshgrid(angle.x, angle.y, indexing='xy')
+        if mode == 'noisy':
+            plt.quiver(x, y, np.sin(angle), np.cos(angle))
+        elif mode == 'hgrf':
+            plt.quiver(y, x, np.sin(angle), np.cos(angle))
         plt.title('Diffusion tensor (primary)', fontsize=18)
 
-    def plot_secondary_axis(self, downscale_factor=8):
+    def plot_secondary_axis(self, downscale_factor=8, mode='noisy'):
         """TODO"""
-        angle = self._obj.principle_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        x, y = np.meshgrid(angle.x, angle.y, indexing='ij')
-        plt.quiver(x, y, -np.sin(angle), np.cos(angle))
+        assert mode in ['noisy', 'hgrf'], "Mode is either noisy or hgrf"
+        angle = self._obj.spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
+        x, y = np.meshgrid(angle.x, angle.y, indexing='xy')
+        if mode == 'noisy':
+            plt.quiver(x, y, np.cos(angle), -np.sin(angle))
+        elif mode == 'hgrf':
+            plt.quiver(y, x, np.cos(angle), -np.sin(angle))
         plt.title('Diffusion tensor (secondary)', fontsize=18)
 
-    def plot_velocity(self, downscale_factor=8):
+    def plot_velocity(self, downscale_factor=8, mode='noisy'):
         """TODO"""
         v = self._obj.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        x, y = np.meshgrid(v.x, v.y, indexing='ij')
-        plt.quiver(x, y, v.vx, v.vy)
+        x, y = np.meshgrid(v.x, v.y, indexing='xy')
+        if mode == 'noisy':
+            plt.quiver(x, y, v.vy, v.vx)
+        elif mode == 'hgrf':
+            plt.quiver(y, x, v.vx, v.vy)
         plt.title('Velocity field', fontsize=18)
 
     def plot_statistics(self):
@@ -160,19 +171,19 @@ class noisy_methods(object):
     def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
         """TODO"""
         num_frames, nx, ny = self._obj.sizes.values()
-
+        extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
         # initialization function: plot the background of each frame
         def init():
-            im.set_data(np.zeros((nx, ny)), vmin=-5, vmax=5)
+            im.set_data(np.zeros((nx, ny)), extent=extent, vmin=-5, vmax=5)
             return [im]
 
         # animation function.  This is called sequentially
         def animate(i):
-            im.set_array(self._obj.isel(t=i))
+            im.set_array(self._obj.isel(t=i).transpose('y', 'x'))
             return [im]
 
         fig, ax = plt.subplots()
-        im = plt.imshow(np.zeros((nx, ny)))
+        im = plt.imshow(np.zeros((nx, ny)), extent=extent)
         plt.colorbar()
         vmin = self._obj.min() if vmin is None else vmin
         vmax = self._obj.min() if vmax is None else vmax

@@ -15,9 +15,9 @@ class SummaryWriter(tensorboardX.SummaryWriter):
         super().__init__(logdir, comment, purge_step, max_queue, flush_secs,
                          filename_suffix, write_to_disk, log_dir, **kwargs)
 
-    def principle_angle(self, tag, principle_angle, mask=None, global_step=None):
-        mask = np.ones_like(principle_angle) if mask is None else mask
-        np.mod(principle_angle, np.pi).where(mask).plot(cmap='hsv')
+    def spatial_angle(self, tag, spatial_angle, mask=None, global_step=None):
+        mask = np.ones_like(spatial_angle) if mask is None else mask
+        np.mod(spatial_angle, np.pi).where(mask).plot(cmap='hsv')
         self.add_figure(tag, plt.gcf(), global_step)
 
 
@@ -27,7 +27,7 @@ class SummaryWriter(tensorboardX.SummaryWriter):
         self.add_figure(tag, plt.gcf(), global_step)
 
 
-    def diffusion(self, tag, diffusion,mask=None, global_step=None, vector_plot=False, envelope=None):
+    def diffusion(self, tag, diffusion, mask=None, global_step=None, vector_plot=False, envelope=None, diffusion_coef=True):
         """TODO"""
         plt.style.use('default')
 
@@ -38,10 +38,10 @@ class SummaryWriter(tensorboardX.SummaryWriter):
             self.add_figure(tag + '_secondary', plt.gcf(), global_step)
 
         if envelope is None:
-            np.mod(diffusion.principle_angle, np.pi).where(mask).plot(cmap='hsv')
+            np.mod(diffusion.spatial_angle, np.pi).where(mask).plot(cmap='hsv')
         else:
             alphas = Normalize(0, envelope.max(), clip=True)(envelope)
-            colors = Normalize(0, np.pi)(np.mod(diffusion.principle_angle, np.pi))
+            colors = Normalize(0, np.pi)(np.mod(diffusion.spatial_angle, np.pi))
             cmap = plt.cm.hsv
             colors = cmap(colors)
             colors[..., -1] = alphas
@@ -53,8 +53,9 @@ class SummaryWriter(tensorboardX.SummaryWriter):
         self.add_figure(tag + '_correlation_length', plt.gcf(), global_step)
         diffusion.correlation_time.where(mask).plot()
         self.add_figure(tag + '_correlation_time', plt.gcf(), global_step)
-        diffusion.diffusion_coefficient.where(mask).plot()
-        self.add_figure(tag + '_diffusion_coefficient', plt.gcf(), global_step)
+        if diffusion_coef:
+            diffusion.diffusion_coefficient.where(mask).plot()
+            self.add_figure(tag + '_diffusion_coefficient', plt.gcf(), global_step)
 
     def advection(self, tag, advection, global_step=None):
         plt.style.use('default')
@@ -283,3 +284,34 @@ class CallbackFn(object):
         if time_passed > self.ckpt_period:
             self.ckpt_time = time.time()
             self._callback_fn()
+
+
+def spatial_angle_gradient(solver, dx=1e-2):
+    """TODO"""
+    def gradient(solver, forward, adjoint, dx):
+        spatial_angle = solver.diffusion.spatial_angle.copy()
+        source = solver.get_laplacian(forward)
+        gradient = np.zeros(shape=solver.params.num_unknowns)
+        for n, (i, j) in enumerate(zip(*np.where(solver.params.mask))):
+            solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j] + dx
+            source_ij = solver.get_laplacian(forward) - source
+            solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j]
+            source_ij = source_ij / dx
+            gradient[n] += (adjoint * source_ij).mean()
+        return gradient
+
+    gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, dx)
+    return gradient_fn
+
+def spatial_angle_set_state(solver):
+    """TODO"""
+    def set_state(solver, state):
+        solver.diffusion.spatial_angle.values[solver.params.mask] = state
+    set_state_fn = lambda state: set_state(solver, state)
+    return set_state_fn
+
+def spatial_angle_get_state(solver, mask=None):
+    """TODO"""
+    get_state_fn = lambda: solver.diffusion.spatial_angle.values[solver.params.mask]
+    return get_state_fn
+

@@ -112,7 +112,6 @@ def get_diffusion_tensor(nx, ny, PARAM_RAT,
     get_diffusion_tensor_image(nx, ny, &diffusion_tensor[0,0,0,0], PARAM_RAT, &c_principal_angle_image[0,0], &c_diffusion_coefficient_image[0,0])
     return np.asarray(diffusion_tensor)
 
-
 def get_laplacian(nt, nx, ny, PARAM_RAT,
                   np.ndarray[double, ndim=2, mode="c"] c_principal_angle_image,
                   np.ndarray[double, ndim=2, mode="c"] c_diffusion_coefficient_image,

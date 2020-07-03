@@ -10,19 +10,19 @@ from scipy.sparse.linalg import lsqr
 
 
 def compute_gradient(solver, forward, adjoint, dx=1e-2):
-    principle_angle = solver.diffusion.principle_angle.copy()
+    spatial_angle = solver.diffusion.spatial_angle.copy()
     source = solver.get_laplacian(forward)
     gradient = np.zeros(shape=solver.params.num_unknowns)
     for n, (i, j) in enumerate(zip(*np.where(solver.params.mask))):
-        solver.diffusion.principle_angle[i, j] = principle_angle[i, j] + dx
+        solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j] + dx
         source_ij = solver.get_laplacian(forward) - source
-        solver.diffusion.principle_angle[i, j] = principle_angle[i, j]
+        solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j]
         source_ij = source_ij / dx
         gradient[n] += (adjoint * source_ij).mean()
     return gradient
 
 def set_state(solver, state):
-    solver.diffusion.principle_angle.values[solver.params.mask] = state
+    solver.diffusion.spatial_angle.values[solver.params.mask] = state
 
 def set_disk_mask(solver):
     solver.params['mask'] = solver.params.r < 0.5 - 2.0 / solver.params.dims['x']
@@ -55,14 +55,14 @@ measurements = xr.load_dataarray(os.path.join(load_path,'measurements.nc'))
 # Load measurements
 advection = pynoisy.advection.disk(direction='ccw')
 diffusion = pynoisy.diffusion.ring(opening_angle=-0.8)
-diffusion.principle_angle[:] = 0.0
+diffusion.spatial_angle[:] = 0.0
 solver = pynoisy.forward.NoisySolver(advection, diffusion)
 solver = set_disk_mask(solver)
 
 forward_fn = lambda source: solver.run_symmetric(source, verbose=False)
 adjoint_fn = lambda source: solver.run_adjoint(source, verbose=False)
 gradient_fn = lambda forward, adjoint: compute_gradient(solver, forward, adjoint)
-get_state_fn = lambda: solver.diffusion.principle_angle.values[solver.params.mask]
+get_state_fn = lambda: solver.diffusion.spatial_angle.values[solver.params.mask]
 set_state_fn = lambda state: set_state(solver, state)
 
 amplitude = 1.0
@@ -75,7 +75,7 @@ writer.average_image('average_frame/measurements', measurements)
 callback_fn = [
     CallbackFn(lambda: writer.add_scalar('Loss', objective_fn.loss, optimizer.iteration)),
     CallbackFn(lambda: writer.diffusion('diffusion/estimate', solver.diffusion, solver.params.mask, optimizer.iteration, envelope=envelope)),
-    CallbackFn(lambda: writer.principle_angle('diffusion/estimate_angle_no_alpha', solver.diffusion.principle_angle, solver.params.mask, optimizer.iteration)),
+    CallbackFn(lambda: writer.spatial_angle('diffusion/estimate_angle_no_alpha', solver.diffusion.spatial_angle, solver.params.mask, optimizer.iteration)),
     CallbackFn(lambda: optimizer.save_checkpoint(solver, logdir), ckpt_period=1*60*60),
 ]
 forward_op = ForwardOperator.krylov(

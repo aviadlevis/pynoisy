@@ -17,14 +17,14 @@ measurements = solver.run_symmetric()
 No noise diffusion angle
 """
 def compute_gradient(solver, forward, adjoint, dx=1e-2):
-    principle_angle = solver.diffusion.principle_angle.copy()
+    spatial_angle = solver.diffusion.spatial_angle.copy()
     source = solver.get_laplacian(forward)
     gradient = np.zeros((64,64))
     for i in range(2,62):
         for j in range(2,62):
-            solver.diffusion.principle_angle[i, j] = principle_angle[i, j] + dx
+            solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j] + dx
             source_ij = solver.get_laplacian(forward) - source
-            solver.diffusion.principle_angle[i, j] = principle_angle[i, j]
+            solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j]
             source_ij = source_ij / dx
             gradient[i,j] += (adjoint * source_ij).mean()
     return gradient
@@ -33,9 +33,9 @@ def compute_gradient(solver, forward, adjoint, dx=1e-2):
 forward_fn = lambda: solver.run_symmetric(verbose=False)
 adjoint_fn = lambda source: solver.run_adjoint(source, verbose=False)
 gradient_fn = lambda forward, adjoint: compute_gradient(solver, forward, adjoint)
-get_state_fn = lambda: np.array(solver.diffusion.principle_angle).ravel()
+get_state_fn = lambda: np.array(solver.diffusion.spatial_angle).ravel()
 set_state_fn = lambda state: solver.diffusion.update(
-    {'principle_angle': xr.DataArray(state.reshape(*solver.diffusion.principle_angle.shape), dims=['x', 'y'])}
+    {'spatial_angle': xr.DataArray(state.reshape(*solver.diffusion.spatial_angle.shape), dims=['x', 'y'])}
 )
 
 forward_op = ForwardOperator(
@@ -63,7 +63,7 @@ callback_fn = [
 ]
 
 # Initialize principle angle
-initial_state = solver.diffusion.principle_angle
+initial_state = solver.diffusion.spatial_angle
 initial_state = initial_state * (0.0 * initial_state.where(initial_state.r <= 0.5)).fillna(1.0)
 
 options={'maxiter': 10000, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}

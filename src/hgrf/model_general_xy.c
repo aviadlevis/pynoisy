@@ -11,7 +11,7 @@
 
 int model_set_gsl_seed(int seed, int myid)
 {
-  return seed + myid;
+  return 0;
 }
 
 void model_set_spacing(double* dx0, double* dx1, double* dx2,
@@ -51,10 +51,10 @@ void model_create_stencil(HYPRE_StructStencil* stencil, int dim)
 			      {-1,0,0}, {1,0,0}, 
 			      {0,-1,0}, {0,1,0}, 
 			      {0,0,-1}, {0,0,1}, 
-			      {-1,-1,0}, {1,-1,0}, 
-			      {1,1,0}, {-1,1,0}, 
-			      {-1,0,-1}, {1,0,-1}, 
-			      {0,-1,-1}, {0,1,-1}, 
+			      {-1,-1,0}, {1,-1,0},
+			      {1,1,0}, {-1,1,0},
+			      {-1,0,-1}, {1,0,-1},
+			      {0,-1,-1}, {0,1,-1},
 			      {-1,0,1}, {1,0,1}, 
 			      {0,-1,1}, {0,1,1}
 			      /* {-1,-1,-1}, {1,-1,-1}, */
@@ -68,17 +68,15 @@ void model_create_stencil(HYPRE_StructStencil* stencil, int dim)
 
 void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
 			      int ni, int nj, int nk, int pi, int pj, int pk, double dx0, double dx1, double dx2,
-			      double param_rct, double param_r12, double param_r02, double spatial_angle_image[ni][nj],
-			      double correlation_time_image[ni][nj], double correlation_length_image[ni][nj])
+			      double param_r12, double spatial_angle_image[ni][nj], double velocity[ni][nj][2],
+			      double correlation_time_image[ni][nj], double correlation_length_image[ni][nj], double* values)
 {
   int i, j;
   int nentries = NSTENCIL;
   int nvalues = nentries * ni * nj * nk;
-  double *values;
+
   int stencil_indices[NSTENCIL];
-  
-  values = (double*) calloc(nvalues, sizeof(double));
-  
+
   for (j = 0; j < nentries; j++)
     stencil_indices[j] = j;
   
@@ -97,17 +95,16 @@ void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
     x0 = param_x0start + dx0 * gridk;			
     x1 = param_x1start + dx1 * gridj;
     x2 = param_x2start + dx2 * gridi;
-    
-    param_coeff(coeff, x0, x1, x2, dx0, dx1, dx2, param_rct, param_r12, param_r02, spatial_angle_image[gridi][gridj],
-                correlation_time_image[gridi][gridj], correlation_length_image[gridi][gridj]);
-    
+
+    param_coeff(coeff, x0, x1, x2, dx0, dx1, dx2, param_r12, ni, nj,
+                spatial_angle_image, velocity, correlation_time_image, correlation_length_image, gridi, gridj);
+
     /*0=a, 1=b, 2=c, 3=d, 4=e, 5=f, etc.*/
     /*
       xx 14 xx    10 04 09    xx 18 xx    ^
       11 05 12    01 00 02    15 06 16    |			 
       xx 13 xx    07 03 08    xx 17 xx    j i ->    k - - >			
     */
-    
     values[i]    = coeff[9];
     values[i+1]  = coeff[0] - coeff[6];
     values[i+2]  = coeff[0] + coeff[6];
@@ -140,220 +137,219 @@ void model_set_stencil_values(HYPRE_StructMatrix* A, int* ilower, int* iupper,
   
   HYPRE_StructMatrixSetBoxValues(*A, ilower, iupper, nentries,
 				 stencil_indices, values);
-  
-  free(values);
+
 }
 
 void model_set_bound(HYPRE_StructMatrix* A, int ni, int nj, int nk,
 		     int pi, int pj, int pk, int npi, int npj, int npk,
 		     double dx0, double dx1, double dx2)
 {
-  int j;
-  int bc_ilower[3];
-  int bc_iupper[3];
-  
-  /*0=a, 1=b, 2=c, 3=d, 4=e, 5=f*/
-  /*
-    xx 14 xx    10 04 09    xx 18 xx    ^
-    11 05 12    01 00 02    15 06 16    |
-    xx 13 xx    07 03 08    xx 17 xx    j i ->    k - - >
-  */
-  
-  /* Recall: pi and pj describe position in the processor grid */
+  /* int j; */
+  /* int bc_ilower[3]; */
+  /* int bc_iupper[3]; */
 
-  /* Set boundary conditions on i */
-  {
-    int nentries = 10;
-    int stencil_indices[nentries];
-    
-    int nvalues  = nentries * nj * nk; /* number of stencil entries times the
-  					  length of one side of my grid box */
-    double *values;
-    values = (double*) calloc(nvalues, sizeof(double));
-    
-    if (pi == 0) {
-      /* Left grid points */
-      bc_ilower[0] = pi * ni;
-      bc_ilower[1] = pj * nj;
-      bc_ilower[2] = pk * nk;
-      
-      bc_iupper[0] = bc_ilower[0];
-      bc_iupper[1] = bc_ilower[1] + nj - 1;
-      bc_iupper[2] = bc_ilower[2] + nk - 1;
-      
-      stencil_indices[0] = 0;
-      stencil_indices[1] = 1;
-      stencil_indices[2] = 3;
-      stencil_indices[3] = 4;
-      stencil_indices[4] = 5;
-      stencil_indices[5] = 6;
-      stencil_indices[6] = 7;
-      stencil_indices[7] = 10;
-      stencil_indices[8] = 11;
-      stencil_indices[9] = 15;
+  /* /\*0=a, 1=b, 2=c, 3=d, 4=e, 5=f*\/ */
+  /* /\* */
+  /*   xx 14 xx    10 04 09    xx 18 xx    ^ */
+  /*   11 05 12    01 00 02    15 06 16    | */
+  /*   xx 13 xx    07 03 08    xx 17 xx    j i ->    k - - > */
+  /* *\/ */
 
-      HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
+  /* /\* Recall: pi and pj describe position in the processor grid *\/ */
 
-      for (j = 0; j < nvalues; j += nentries) {
-  	values[j]   += values[j+1];
-  	values[j+2] += values[j+6];
-  	values[j+3] += values[j+7];
-  	values[j+4] += values[j+8];
-  	values[j+5] += values[j+9];
+  /* /\* Set boundary conditions on i *\/ */
+  /* { */
+  /*   int nentries = 10; */
+  /*   int stencil_indices[nentries]; */
 
-  	values[j+1] = 0.0;
-  	values[j+6] = 0.0;
-  	values[j+7] = 0.0;
-  	values[j+8] = 0.0;
-  	values[j+9] = 0.0;
-      }
-      
-      HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
-    }
-    
-    if (pi == npi - 1) {
-      /* Right grid points */
-      bc_ilower[0] = pi * ni + ni - 1;
-      bc_ilower[1] = pj * nj;
-      bc_ilower[2] = pk * nk;
-      
-      bc_iupper[0] = bc_ilower[0];
-      bc_iupper[1] = bc_ilower[1] + nj - 1;
-      bc_iupper[2] = bc_ilower[2] + nk - 1;
-      
-      stencil_indices[0] = 0;
-      stencil_indices[1] = 2;
-      stencil_indices[2] = 3;
-      stencil_indices[3] = 4;
-      stencil_indices[4] = 5;
-      stencil_indices[5] = 6;
-      stencil_indices[6] = 8;
-      stencil_indices[7] = 9;
-      stencil_indices[8] = 12;
-      stencil_indices[9] = 16;
-      
-      HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
+  /*   int nvalues  = nentries * nj * nk; /\* number of stencil entries times the */
+  /* 					  length of one side of my grid box *\/ */
+  /*   double *values; */
+  /*   values = (double*) calloc(nvalues, sizeof(double)); */
 
-      for (j = 0; j < nvalues; j+= nentries) {
-  	values[j]   += values[j+1];
-  	values[j+2] += values[j+6];
-  	values[j+3] += values[j+7];
-  	values[j+4] += values[j+8];
-  	values[j+5] += values[j+9];
+  /*   if (pi == 0) { */
+  /*     /\* Left grid points *\/ */
+  /*     bc_ilower[0] = pi * ni; */
+  /*     bc_ilower[1] = pj * nj; */
+  /*     bc_ilower[2] = pk * nk; */
 
-  	values[j+1] = 0.0;
-  	values[j+6] = 0.0;
-  	values[j+7] = 0.0;
-  	values[j+8] = 0.0;
-  	values[j+9] = 0.0;
-      }
-      
-      HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
-    }
-    
-    free(values);
-  }
+  /*     bc_iupper[0] = bc_ilower[0]; */
+  /*     bc_iupper[1] = bc_ilower[1] + nj - 1; */
+  /*     bc_iupper[2] = bc_ilower[2] + nk - 1; */
 
-  /* Set boundary conditions on j */
-  {
-    int nentries = 10;
-    int stencil_indices[nentries];
+  /*     stencil_indices[0] = 0; */
+  /*     stencil_indices[1] = 1; */
+  /*     stencil_indices[2] = 3; */
+  /*     stencil_indices[3] = 4; */
+  /*     stencil_indices[4] = 5; */
+  /*     stencil_indices[5] = 6; */
+  /*     stencil_indices[6] = 7; */
+  /*     stencil_indices[7] = 10; */
+  /*     stencil_indices[8] = 11; */
+  /*     stencil_indices[9] = 15; */
 
-    int nvalues  = nentries * ni * nk; /* number of stencil entries times the
-  					  length of one side of my grid box */
-    double *values;
-    values = (double*) calloc(nvalues, sizeof(double));
-    
-    if (pj == 0) {
-      /* Bottom grid points */
-      bc_ilower[0] = pi * ni;
-      bc_ilower[1] = pj * nj;
-      bc_ilower[2] = pk * nk;
-      
-      bc_iupper[0] = bc_ilower[0] + ni - 1;
-      bc_iupper[1] = bc_ilower[1];
-      bc_iupper[2] = bc_ilower[2] + nk - 1;
-      
-      stencil_indices[0] = 0;
-      stencil_indices[1] = 1;
-      stencil_indices[2] = 2;
-      stencil_indices[3] = 3;
-      stencil_indices[4] = 5;
-      stencil_indices[5] = 6;
-      stencil_indices[6] = 7;
-      stencil_indices[7] = 8;
-      stencil_indices[8] = 13;
-      stencil_indices[9] = 17;
-      
-      HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
+  /*     HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
 
-      for (j = 0; j < nvalues; j+= nentries) {
-  	values[j]   += values[j+3];
-  	values[j+1] += values[j+6];
-  	values[j+2] += values[j+7];
-  	values[j+4] += values[j+8];
-  	values[j+5] += values[j+9];
+  /*     for (j = 0; j < nvalues; j += nentries) { */
+  /* 	values[j]   += values[j+1]; */
+  /* 	values[j+2] += values[j+6]; */
+  /* 	values[j+3] += values[j+7]; */
+  /* 	values[j+4] += values[j+8]; */
+  /* 	values[j+5] += values[j+9]; */
 
-  	values[j+3] = 0.0;
-  	values[j+6] = 0.0;
-  	values[j+7] = 0.0;
-  	values[j+8] = 0.0;
-  	values[j+9] = 0.0;
-      }
+  /* 	values[j+1] = 0.0; */
+  /* 	values[j+6] = 0.0; */
+  /* 	values[j+7] = 0.0; */
+  /* 	values[j+8] = 0.0; */
+  /* 	values[j+9] = 0.0; */
+  /*     } */
 
-      HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
-    }
-    
-    if (pj == npj - 1) {
-      /* Upper grid points */
-      bc_ilower[0] = pi * ni;
-      bc_ilower[1] = pj * nj + nj - 1;
-      bc_ilower[2] = pk * nk;
-      
-      bc_iupper[0] = bc_ilower[0] + ni - 1;
-      bc_iupper[1] = bc_ilower[1];
-      bc_iupper[2] = bc_ilower[2] + nk - 1;
-      
-      stencil_indices[0] = 0;
-      stencil_indices[1] = 1;
-      stencil_indices[2] = 2;
-      stencil_indices[3] = 4;
-      stencil_indices[4] = 5;
-      stencil_indices[5] = 6;
-      stencil_indices[6] = 9;
-      stencil_indices[7] = 10;
-      stencil_indices[8] = 14;
-      stencil_indices[9] = 18;
-      
-      HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
+  /*     HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+  /*   } */
 
-      for (j = 0; j < nvalues; j+= nentries) {
-  	values[j]   += values[j+3];
-  	values[j+1] += values[j+7];
-  	values[j+2] += values[j+6];
-  	values[j+4] += values[j+8];
-  	values[j+5] += values[j+9];
+  /*   if (pi == npi - 1) { */
+  /*     /\* Right grid points *\/ */
+  /*     bc_ilower[0] = pi * ni + ni - 1; */
+  /*     bc_ilower[1] = pj * nj; */
+  /*     bc_ilower[2] = pk * nk; */
 
-  	values[j+3] = 0.0;
-  	values[j+6] = 0.0;
-  	values[j+7] = 0.0;
-  	values[j+8] = 0.0;
-  	values[j+9] = 0.0;
-      }
+  /*     bc_iupper[0] = bc_ilower[0]; */
+  /*     bc_iupper[1] = bc_ilower[1] + nj - 1; */
+  /*     bc_iupper[2] = bc_ilower[2] + nk - 1; */
 
-      HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries,
-  				     stencil_indices, values);
-    }
-    
-    free(values);
-  }
+  /*     stencil_indices[0] = 0; */
+  /*     stencil_indices[1] = 2; */
+  /*     stencil_indices[2] = 3; */
+  /*     stencil_indices[3] = 4; */
+  /*     stencil_indices[4] = 5; */
+  /*     stencil_indices[5] = 6; */
+  /*     stencil_indices[6] = 8; */
+  /*     stencil_indices[7] = 9; */
+  /*     stencil_indices[8] = 12; */
+  /*     stencil_indices[9] = 16; */
+
+  /*     HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+
+  /*     for (j = 0; j < nvalues; j+= nentries) { */
+  /* 	values[j]   += values[j+1]; */
+  /* 	values[j+2] += values[j+6]; */
+  /* 	values[j+3] += values[j+7]; */
+  /* 	values[j+4] += values[j+8]; */
+  /* 	values[j+5] += values[j+9]; */
+
+  /* 	values[j+1] = 0.0; */
+  /* 	values[j+6] = 0.0; */
+  /* 	values[j+7] = 0.0; */
+  /* 	values[j+8] = 0.0; */
+  /* 	values[j+9] = 0.0; */
+  /*     } */
+
+  /*     HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+  /*   } */
+
+  /*   free(values); */
+  /* } */
+
+  /* /\* Set boundary conditions on j *\/ */
+  /* { */
+  /*   int nentries = 10; */
+  /*   int stencil_indices[nentries]; */
+
+  /*   int nvalues  = nentries * ni * nk; /\* number of stencil entries times the */
+  /* 					  length of one side of my grid box *\/ */
+  /*   double *values; */
+  /*   values = (double*) calloc(nvalues, sizeof(double)); */
+
+  /*   if (pj == 0) { */
+  /*     /\* Bottom grid points *\/ */
+  /*     bc_ilower[0] = pi * ni; */
+  /*     bc_ilower[1] = pj * nj; */
+  /*     bc_ilower[2] = pk * nk; */
+
+  /*     bc_iupper[0] = bc_ilower[0] + ni - 1; */
+  /*     bc_iupper[1] = bc_ilower[1]; */
+  /*     bc_iupper[2] = bc_ilower[2] + nk - 1; */
+
+  /*     stencil_indices[0] = 0; */
+  /*     stencil_indices[1] = 1; */
+  /*     stencil_indices[2] = 2; */
+  /*     stencil_indices[3] = 3; */
+  /*     stencil_indices[4] = 5; */
+  /*     stencil_indices[5] = 6; */
+  /*     stencil_indices[6] = 7; */
+  /*     stencil_indices[7] = 8; */
+  /*     stencil_indices[8] = 13; */
+  /*     stencil_indices[9] = 17; */
+
+  /*     HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+
+  /*     for (j = 0; j < nvalues; j+= nentries) { */
+  /* 	values[j]   += values[j+3]; */
+  /* 	values[j+1] += values[j+6]; */
+  /* 	values[j+2] += values[j+7]; */
+  /* 	values[j+4] += values[j+8]; */
+  /* 	values[j+5] += values[j+9]; */
+
+  /* 	values[j+3] = 0.0; */
+  /* 	values[j+6] = 0.0; */
+  /* 	values[j+7] = 0.0; */
+  /* 	values[j+8] = 0.0; */
+  /* 	values[j+9] = 0.0; */
+  /*     } */
+
+  /*     HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+  /*   } */
+
+  /*   if (pj == npj - 1) { */
+  /*     /\* Upper grid points *\/ */
+  /*     bc_ilower[0] = pi * ni; */
+  /*     bc_ilower[1] = pj * nj + nj - 1; */
+  /*     bc_ilower[2] = pk * nk; */
+
+  /*     bc_iupper[0] = bc_ilower[0] + ni - 1; */
+  /*     bc_iupper[1] = bc_ilower[1]; */
+  /*     bc_iupper[2] = bc_ilower[2] + nk - 1; */
+
+  /*     stencil_indices[0] = 0; */
+  /*     stencil_indices[1] = 1; */
+  /*     stencil_indices[2] = 2; */
+  /*     stencil_indices[3] = 4; */
+  /*     stencil_indices[4] = 5; */
+  /*     stencil_indices[5] = 6; */
+  /*     stencil_indices[6] = 9; */
+  /*     stencil_indices[7] = 10; */
+  /*     stencil_indices[8] = 14; */
+  /*     stencil_indices[9] = 18; */
+
+  /*     HYPRE_StructMatrixGetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+
+  /*     for (j = 0; j < nvalues; j+= nentries) { */
+  /* 	values[j]   += values[j+3]; */
+  /* 	values[j+1] += values[j+7]; */
+  /* 	values[j+2] += values[j+6]; */
+  /* 	values[j+4] += values[j+8]; */
+  /* 	values[j+5] += values[j+9]; */
+
+  /* 	values[j+3] = 0.0; */
+  /* 	values[j+6] = 0.0; */
+  /* 	values[j+7] = 0.0; */
+  /* 	values[j+8] = 0.0; */
+  /* 	values[j+9] = 0.0; */
+  /*     } */
+
+  /*     HYPRE_StructMatrixSetBoxValues(*A, bc_ilower, bc_iupper, nentries, */
+  /* 				     stencil_indices, values); */
+  /*   } */
+
+  /*   free(values); */
+  /* } */
 }
 
 double model_area(int i, int j, int k, int ni, int nj, int nk,
