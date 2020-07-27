@@ -259,13 +259,15 @@ class HGRFSolver(Solver):
 
         sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
 
+        scaling = max(
+            1e-10, np.sqrt(self.diffusion.tensor_ratio.data *
+                           self.diffusion.correlation_time.data *
+                           self.diffusion.correlation_length.data ** 2))
         if n_jobs == 1:
             pixels = [hgrf_core.run(
                 num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
                 self.diffusion.tensor_ratio.data,
-                np.array(source[i] * np.sqrt(
-                    self.diffusion.tensor_ratio.data * self.diffusion.correlation_time.data * self.diffusion.correlation_length.data ** 2),
-                         dtype=np.float64, order='C'),
+                np.array(source[i] * scaling, dtype=np.float64, order='C'),
                 np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
                 np.array(self.v, dtype=np.float64, order='C'),
                 np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
@@ -275,9 +277,7 @@ class HGRFSolver(Solver):
                 delayed(hgrf_core.run)(
                     num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
                     self.diffusion.tensor_ratio.data,
-                    np.array(source[i] * np.sqrt(
-                        self.diffusion.tensor_ratio.data * self.diffusion.correlation_time.data * self.diffusion.correlation_length.data ** 2),
-                             dtype=np.float64, order='C'),
+                    np.array(source[i] * scaling, dtype=np.float64, order='C'),
                     np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
                     np.array(self.v, dtype=np.float64, order='C'),
                     np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),

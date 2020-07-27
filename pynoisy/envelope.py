@@ -20,7 +20,7 @@ def grid(data):
 
 
 def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
-         photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, amplitude=0.05):
+         photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10):
     """
     TODO
     """
@@ -66,8 +66,7 @@ def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05,
         'photon_ring_decay': photon_ring_decay,
         'ascent': ascent,
         'inner_decay': inner_decay,
-        'outer_decay': outer_decay,
-        'amplitude': amplitude
+        'outer_decay': outer_decay
     }
     envelope.attrs.update(new_attrs)
     return envelope

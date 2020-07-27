@@ -6,7 +6,6 @@ from matplotlib import animation
 from ipywidgets import interact, fixed, interactive
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
-import glob
 
 
 def matern_covariance(length_scale):
@@ -186,7 +185,7 @@ class noisy_methods(object):
         im = plt.imshow(np.zeros((nx, ny)), extent=extent)
         plt.colorbar()
         vmin = self._obj.min() if vmin is None else vmin
-        vmax = self._obj.min() if vmax is None else vmax
+        vmax = self._obj.max() if vmax is None else vmax
         im.set_clim(vmin, vmax)
         anim = animation.FuncAnimation(fig, animate, frames=num_frames, interval=1e3 / fps)
 
