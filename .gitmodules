@@ -1,0 +1,3 @@
+[submodule "inoisy"]
+	path = inoisy
+	url = https://github.com/aviadlevis/inoisy.git
