@@ -235,7 +235,6 @@ class HGRFSolver(Solver):
         self._solver_id = self.solver_list.index(solver_type)
         self._params.update({'solver_type': solver_type})
         self._params.attrs = {'solver_type': 'HGRF'}
-        hgrf_core.init_mpi()
 
     def run(self, maxiter=100, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
