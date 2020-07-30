@@ -8,7 +8,9 @@ import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
 import warnings
-
+import subprocess
+import os, tempfile
+from scipy.special import gamma
 
 class Solver(object):
     """TODO"""
@@ -42,10 +44,8 @@ class Solver(object):
         self._diffusion.attrs = diffusion.attrs
 
     def sample_source(self, num_frames, evolution_length=0.1, num_samples=1, seed=None):
-        if seed is not None:
-            np.random.seed(seed)
-        else:
-            np.random.seed(self.seed)
+        seed = self.seed if seed is None else seed
+        np.random.seed(seed)
         source = np.random.randn(num_samples, num_frames, self.nx, self.ny) * self.forcing_strength
         movie = xr.DataArray(data=source,
                              coords={'sample': range(num_samples),
@@ -228,6 +228,72 @@ class NoisySolver(Solver):
 
 
 class HGRFSolver(Solver):
+    solver_list = ['PCG', 'SMG']
+    random_types = ['numpy', 'zigur']
+
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy'):
+        super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
+        assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
+        assert random_type in self.random_types, 'Not supported random type: {}'.format(random_type)
+        self._solver_id = self.solver_list.index(solver_type)
+        self._params.update({'solver_type': solver_type, 'random_type': random_type})
+        self._params.attrs = {'solver_type': 'HGRF'}
+        self._input_file = tempfile.NamedTemporaryFile(suffix='.h5')
+        self._output_file = tempfile.NamedTemporaryFile(suffix='.h5')
+
+    def __del__(self):
+        del self._input_file
+        del self._output_file
+
+    def run(self, maxiter=50, nrecur=1, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None):
+        """TODO"""
+        seed = self.seed if seed is None else seed
+
+        # Either pre-determined source or randomly sampled from Gaussian distribution
+        output = os.path.dirname(self._output_file.name)
+        filename = os.path.relpath(self._output_file.name, output)
+        cmd = ['mpiexec', '-n', str(n_jobs), 'general_xy', '-ni', str(self.nx), '-nj', str(self.ny),
+               '-seed', str(), '-output', output, '-filename', filename, '-maxiter', str(maxiter),
+               '-verbose', str(int(verbose)), '-nrecur', str(nrecur)]
+
+        assert ((num_frames is not None) or (source is not None)),\
+            'If the source is unspecified, the number of frames should be specified.'
+
+        if (source is None) and (self.params.random_type == 'zigur'):
+            if not np.log2(num_frames).is_integer():
+                warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
+        else:
+            num_frames = source.sizes['t'] if source is not None else num_frames
+            if source is None:
+                source = self.sample_source(num_frames, evolution_length, num_samples, seed)
+                factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
+                scaling = np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
+                                  self.diffusion.correlation_length ** 2).clip(min=1e-10)
+                source = source * scaling
+
+            source = source.transpose('sample', 't', 'y', 'x', transpose_coords=False)
+            source.to_dataset(name='data_raw').to_netcdf(self._input_file.name, group='data')
+            cmd.extend(['-source', self._input_file.name])
+
+        cmd.extend(['-nk', str(num_frames)])
+        subprocess.run(cmd)
+
+        pixels = xr.load_dataset(self._output_file.name, group='data').data_raw.data
+        coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
+        dims = ['t', 'y', 'x']
+        attrs = {'seed': seed}
+
+        if (num_samples > 1):
+            raise NotImplementedError
+            # coords['sample'] = range(num_samples)
+            # dims = ['sample'] + dims
+            # coords['seed'] = ('sample', seed + np.arange(num_samples))
+
+        movie = xr.DataArray(data=pixels, coords=coords, dims=dims, attrs=attrs)
+        return movie
+
+
+class HGRFSolver_old(Solver):
     solver_list = ['PCG', 'SMG']
     def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG'):
         super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)

@@ -7,6 +7,8 @@ import subprocess
 import sys
 import os, tempfile
 
+args = sys.argv[1:]
+
 def symlink(target, link_name, overwrite=True):
     '''
     Create a symbolic link named link_name pointing to target.
@@ -45,6 +47,23 @@ def symlink(target, link_name, overwrite=True):
             os.remove(temp_link_name)
         raise
 
+
+if 'cleanall' in args:
+    subprocess.Popen("rm -rf build", shell=True, executable="/bin/bash")
+    subprocess.Popen("rm -rf *.c", shell=True, executable="/bin/bash")
+    subprocess.Popen("rm -rf *.so", shell=True, executable="/bin/bash")
+    subprocess.Popen(["make clean"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
+    os.unlink(sys.executable.split('python')[0] + 'general_xy')
+
+    # Now do a normal clean
+    sys.argv[1] = "clean"
+
+
+# Compile general_xy model and create a symbolic link in the executable path
+if 'install' in args or 'develop' in args:
+    subprocess.Popen(["make general_xy"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
+    symlink(os.path.abspath('./inoisy/general_xy'), sys.executable.split('python')[0] + 'general_xy')
+
 extensions = [
     Extension(
         'noisy_core',
@@ -73,6 +92,6 @@ setup(
     ext_modules=cythonize(extensions)
 )
 
-# Compile general_xy model and create a symbolic link in the executable path
-subprocess.Popen(["make general_xy"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
-symlink(os.path.abspath('./inoisy/general_xy'), sys.executable.split('python')[0] + 'general_xy')
+
+
+
