@@ -231,19 +231,20 @@ class HGRFSolver(Solver):
     solver_list = ['PCG', 'SMG']
     random_types = ['numpy', 'zigur']
 
-    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy'):
+
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy', executable='matrices'):
         super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
         assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
         assert random_type in self.random_types, 'Not supported random type: {}'.format(random_type)
         self._solver_id = self.solver_list.index(solver_type)
         self._params.update({'solver_type': solver_type, 'random_type': random_type})
-        self._params.attrs = {'solver_type': 'HGRF'}
-        self._input_file = tempfile.NamedTemporaryFile(suffix='.h5')
+        self._params.attrs = {'solver_type': 'HGRF', 'executable': executable}
+        self._param_file = tempfile.NamedTemporaryFile(suffix='.h5')
+        self._src_file = tempfile.NamedTemporaryFile(suffix='.h5')
         self._output_file = tempfile.NamedTemporaryFile(suffix='.h5')
 
     def __del__(self):
-        del self._input_file
-        del self._output_file
+        del self._param_file, self._src_file, self._output_file
 
     def run(self, maxiter=50, nrecur=1, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None):
         """TODO"""
@@ -252,9 +253,10 @@ class HGRFSolver(Solver):
         # Either pre-determined source or randomly sampled from Gaussian distribution
         output = os.path.dirname(self._output_file.name)
         filename = os.path.relpath(self._output_file.name, output)
-        cmd = ['mpiexec', '-n', str(n_jobs), 'general_xy', '-ni', str(self.nx), '-nj', str(self.ny),
+        self.save(self._param_file.name)
+        cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-ni', str(self.nx), '-nj', str(self.ny),
                '-seed', str(), '-output', output, '-filename', filename, '-maxiter', str(maxiter),
-               '-verbose', str(int(verbose)), '-nrecur', str(nrecur)]
+               '-verbose', str(int(verbose)), '-nrecur', str(nrecur), '-params', self._param_file.name]
 
         assert ((num_frames is not None) or (source is not None)),\
             'If the source is unspecified, the number of frames should be specified.'
@@ -272,8 +274,8 @@ class HGRFSolver(Solver):
                 source = source * scaling
 
             source = source.transpose('sample', 't', 'y', 'x', transpose_coords=False)
-            source.to_dataset(name='data_raw').to_netcdf(self._input_file.name, group='data')
-            cmd.extend(['-source', self._input_file.name])
+            source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data')
+            cmd.extend(['-source', self._src_file.name])
 
         cmd.extend(['-nk', str(num_frames)])
         subprocess.run(cmd)
@@ -292,72 +294,6 @@ class HGRFSolver(Solver):
         movie = xr.DataArray(data=pixels, coords=coords, dims=dims, attrs=attrs)
         return movie
 
-
-class HGRFSolver_old(Solver):
-    solver_list = ['PCG', 'SMG']
-    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG'):
-        super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
-        assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
-        self._solver_id = self.solver_list.index(solver_type)
-        self._params.update({'solver_type': solver_type})
-        self._params.attrs = {'solver_type': 'HGRF'}
-
-    def run(self, maxiter=100, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None):
-        """TODO"""
-        verbose = int(verbose)
-        # Either pre-determined source or randomly sampled from Gaussian distribution
-        if source is None:
-            assert num_frames is not None, 'If the source is unspecified, the number of frames should be specified.'
-            source = self.sample_source(num_frames, evolution_length, num_samples, seed)
-        else:
-            source_type = type(source)
-            if source_type == np.ndarray:
-                source = np.expand_dims(source, 0) if source.ndim == 3 else source
-                num_samples = source.shape[0]
-                num_frames = source.shape[1]
-            elif source_type == xr.DataArray:
-                source = source.expand_dims('sample') if 'sample' not in source.dims else source
-                num_samples = source.sample.size
-                num_frames = source.t.size
-            else:
-                raise AttributeError('Source type ({}) not implemented'.format(source_type))
-
-        sample_range = tqdm(range(num_samples)) if verbose is True else range(num_samples)
-
-        scaling = max(
-            1e-10, np.sqrt(self.diffusion.tensor_ratio.data *
-                           self.diffusion.correlation_time.data *
-                           self.diffusion.correlation_length.data ** 2))
-        if n_jobs == 1:
-            pixels = [hgrf_core.run(
-                num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
-                self.diffusion.tensor_ratio.data,
-                np.array(source[i] * scaling, dtype=np.float64, order='C'),
-                np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
-                np.array(self.v, dtype=np.float64, order='C'),
-                np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
-                np.array(self.diffusion.correlation_length, dtype=np.float64, order='C')) for i in sample_range]
-        else:
-            pixels = Parallel(n_jobs=min(n_jobs, num_samples))(
-                delayed(hgrf_core.run)(
-                    num_frames, self.nx, self.ny, self._solver_id, maxiter, verbose,
-                    self.diffusion.tensor_ratio.data,
-                    np.array(source[i] * scaling, dtype=np.float64, order='C'),
-                    np.array(self.diffusion.spatial_angle, dtype=np.float64, order='C'),
-                    np.array(self.v, dtype=np.float64, order='C'),
-                    np.array(self.diffusion.correlation_time, dtype=np.float64, order='C'),
-                    np.array(self.diffusion.correlation_length, dtype=np.float64, order='C')) for i in sample_range)
-        movie = xr.DataArray(data=pixels,
-                             coords={'sample': range(num_samples),
-                                     't': np.linspace(0, evolution_length, num_frames),
-                                     'x': self.params.x, 'y': self.params.y},
-                             dims=['sample', 't', 'x', 'y'])
-
-        movie.attrs['seed'] = self.seed
-        if num_samples == 1:
-            movie = movie.squeeze('sample')
-        return movie
-
     def get_laplacian(self, movie):
         num_frames = movie.t.size if (type(movie)==xr.DataArray) else movie.shape[0]
         lap = hgrf_core.run(num_frames, self.nx, self.ny, 2, 1, 0,
@@ -369,6 +305,7 @@ class HGRFSolver_old(Solver):
                 np.array(self.diffusion.correlation_length, dtype=np.float64, order='C'))
         laplacian = xr.DataArray(data=lap, coords=movie.coords, dims=movie.dims)
         return laplacian
+
 
 
 

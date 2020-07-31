@@ -1,7 +1,7 @@
 cimport numpy as np
 import numpy as np
 
-cdef extern from "param_general_xy.c":
+cdef extern from "general_xy_matrices.c":
     void get_correlation_time_image(int ni, int nj, double* correlation_time_image, double param_tau, double param_rct)
     void get_correlation_length_image(int ni, int nj, double* correlation_length_image, double param_rct, double param_lam)
     void get_spatial_angle_image(int ni, int nj, double* spatial_angle_image, double param_rct, double param_theta)

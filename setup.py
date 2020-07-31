@@ -52,8 +52,9 @@ if 'cleanall' in args:
     subprocess.Popen("rm -rf build", shell=True, executable="/bin/bash")
     subprocess.Popen("rm -rf *.c", shell=True, executable="/bin/bash")
     subprocess.Popen("rm -rf *.so", shell=True, executable="/bin/bash")
-    subprocess.Popen(["make clean"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
-    os.unlink(sys.executable.split('python')[0] + 'general_xy')
+    subprocess.Popen(["make distclean"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
+    if os.path.exists(sys.executable.split('python')[0] + 'matrices'):
+        os.unlink(sys.executable.split('python')[0] + 'matrices')
 
     # Now do a normal clean
     sys.argv[1] = "clean"
@@ -61,8 +62,8 @@ if 'cleanall' in args:
 
 # Compile general_xy model and create a symbolic link in the executable path
 if 'install' in args or 'develop' in args:
-    subprocess.Popen(["make general_xy"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
-    symlink(os.path.abspath('./inoisy/general_xy'), sys.executable.split('python')[0] + 'general_xy')
+    subprocess.Popen(["make matrices"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
+    symlink(os.path.abspath('./inoisy/matrices'), sys.executable.split('python')[0] + 'matrices')
 
 extensions = [
     Extension(
