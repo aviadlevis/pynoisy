@@ -15,7 +15,7 @@ def grid(vx, vy):
     )
     return advection
 
-def disk(nx, ny, direction='cw', scaling_radius=0.2):
+def disk(nx, ny, direction='ccw', scaling_radius=0.2):
     """
     TODO
 

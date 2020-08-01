@@ -142,22 +142,22 @@ def disk(nx, ny, tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     diffusion.attrs.update(new_attrs)
     return diffusion
 
-def general_xy(nx, ny, opening_angle=-np.pi/2 + np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, scaling_radius=0.5):
+def general_xy(nx, ny, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, scaling_radius=0.5):
     """
     TODO
 
     Parameters
     ----------
-    opening_angle: float, default= pi/3
+    opening_angle: float, default= np.pi/2 - np.pi/9
         This angle defines the opening angle of spirals with respect to the local radius
     tau: float, default=1.0
         product of correlation time and local Keplerian frequency.
     lam: float, default=5.0
         ratio of correlation length to local radius
-    scaling_radius: float, default=0.5
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
     tensor_ratio (r12): float, default=0.1
         ratio for the diffusion tensor along the two principal axis.
+    scaling_radius: float, default=0.5
+        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
     """
     diffusion = grid(
         spatial_angle=hgrf_core.get_generalxy_spatial_angle(nx, ny, scaling_radius, opening_angle),

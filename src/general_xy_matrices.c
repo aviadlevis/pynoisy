@@ -60,7 +60,7 @@ static double w_keplerian(double x0, double x1, double x2, double param_rct)
 /* unit vector in direction of spatial correlation */
 static double get_spatial_angle(double x0, double x1, double x2, double param_rct, double param_theta)
 {
-  return atan2(x2, x1) + copysign( param_theta, w_keplerian(x0, x1, x2, param_rct) );
+  return atan2(x2, x1) + param_theta;
 }
 
 static void get_velocity(double x0, double x1, double x2, double* v, double direction, double param_rct)

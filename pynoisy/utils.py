@@ -173,16 +173,16 @@ class noisy_methods(object):
         extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
         # initialization function: plot the background of each frame
         def init():
-            im.set_data(np.zeros((nx, ny)), extent=extent, vmin=-5, vmax=5)
+            im.set_data(np.zeros((nx, ny)), extent=extent, vmin=-1, vmax=1)
             return [im]
 
         # animation function.  This is called sequentially
         def animate(i):
-            im.set_array(self._obj.isel(t=i).transpose('y', 'x'))
+            im.set_array(self._obj.isel(t=i))
             return [im]
 
         fig, ax = plt.subplots()
-        im = plt.imshow(np.zeros((nx, ny)), extent=extent)
+        im = plt.imshow(np.zeros((nx, ny)), extent=extent, origin='lower')
         plt.colorbar()
         vmin = self._obj.min() if vmin is None else vmin
         vmax = self._obj.max() if vmax is None else vmax
