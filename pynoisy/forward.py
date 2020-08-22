@@ -3,7 +3,7 @@ TODO: Some documentation and general description goes here.
 """
 import xarray as xr
 import numpy as np
-import noisy_core, hgrf_core
+import noisy_core
 import pynoisy.utils as utils
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -231,8 +231,7 @@ class HGRFSolver(Solver):
     solver_list = ['PCG', 'SMG']
     random_types = ['numpy', 'zigur']
 
-
-    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy', executable='matrices'):
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='SMG', random_type='numpy', executable='matrices'):
         super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
         assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
         assert random_type in self.random_types, 'Not supported random type: {}'.format(random_type)
@@ -246,7 +245,8 @@ class HGRFSolver(Solver):
     def __del__(self):
         del self._param_file, self._src_file, self._output_file
 
-    def run(self, maxiter=50, nrecur=1, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1, n_jobs=1, seed=None, solver_id=None):
+    def run(self, maxiter=50, nrecur=1, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1,
+            n_jobs=1, seed=None, solver_id=None, timer=False):
         """TODO"""
         seed = self.seed if seed is None else seed
         solver_id = self._solver_id if solver_id is None else solver_id
@@ -256,11 +256,13 @@ class HGRFSolver(Solver):
         filename = os.path.relpath(self._output_file.name, output)
         self.save(self._param_file.name)
         cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-ni', str(self.nx), '-nj', str(self.ny),
-                '-seed', str(), '-output', output, '-filename', filename, '-maxiter', str(maxiter),
-                '-verbose', str(int(verbose)), '-nrecur', str(nrecur), '-params', self._param_file.name,
-               '-solver', str(solver_id)]
+               '-seed', str(seed), '-output', output, '-filename', filename, '-maxiter', str(maxiter),
+               '-verbose', str(int(verbose)), '-nrecur', str(nrecur), '-dump',
+               '-params', self._param_file.name, '-solver', str(solver_id)]
+        if timer is True:
+            cmd.append('-timer')
 
-        assert ((num_frames is not None) or (source is not None)),\
+        assert ((num_frames is not None) or (source is not None)), \
             'If the source is unspecified, the number of frames should be specified.'
 
         if (source is None) and (self.params.random_type == 'zigur'):
@@ -274,17 +276,33 @@ class HGRFSolver(Solver):
                 scaling = np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
                                   self.diffusion.correlation_length ** 2).clip(min=1e-10)
                 source = source * scaling
-            source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data')
+
+            mode = 'a' if solver_id == 3 else 'w'
+            source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
             cmd.extend(['-source', self._src_file.name])
 
         assert np.mod(num_frames, n_jobs) == 0, 'Num frames / n_jobs should be an integer'
         cmd.extend(['-nk', str(num_frames / n_jobs)])
         subprocess.run(cmd)
 
-        pixels = xr.load_dataset(self._output_file.name, group='data').data_raw.data
+        pixels = xr.load_dataset(self._output_file.name, group='data')
         coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
         dims = ['t', 'x', 'y']
         attrs = {'seed': seed}
+
+        final_movie = xr.DataArray(data=pixels.data_raw.data, coords=coords, dims=dims, attrs=attrs)
+        final_movie = final_movie.assign_coords(deg=nrecur)
+
+        movies = [
+            xr.DataArray(pixels['step_{}'.format(deg)].data, coords=coords, dims=dims, attrs=attrs).assign_coords(
+                deg=deg + 1)
+            for deg in range(nrecur - 1)
+        ]
+
+        movies.append(final_movie)
+        movie = xr.concat(movies, dim='deg')
+        if nrecur == 1:
+            movie = movie.squeeze('deg')
 
         if (num_samples > 1):
             raise NotImplementedError
@@ -292,12 +310,16 @@ class HGRFSolver(Solver):
             # dims = ['sample'] + dims
             # coords['seed'] = ('sample', seed + np.arange(num_samples))
 
-        movie = xr.DataArray(data=pixels, coords=coords, dims=dims, attrs=attrs)
         return movie
 
-    def get_laplacian(self, movie):
-        return -self.run(source=movie, verbose=0, solver_id=2)
+    def get_laplacian(self, movie, verbose=0, timer=False):
+        return self.run(solver_id=2, source=movie, verbose=verbose, timer=timer)
 
+    def get_spatial_angle_gradient(self, forward, adjoint, verbose=0, timer=False):
+        adjoint.to_dataset(name='adjoint').to_netcdf(self._src_file.name, group='data', mode='w')
+        output = self.run(solver_id=3, source=forward, verbose=verbose, timer=timer)
+        gradient = xr.DataArray(data=output.sum('t').data.T, coords=self.params.coords)
+        return output
 
 
 

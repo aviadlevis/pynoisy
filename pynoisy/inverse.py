@@ -1,13 +1,14 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import  pynoisy
 import numpy as np
 import time
 import tensorboardX
 import matplotlib.pyplot as plt
 import os
+import xarray as xr
 from matplotlib.colors import Normalize
+import pynoisy.utils
 
 class SummaryWriter(tensorboardX.SummaryWriter):
     def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10, flush_secs=120,
@@ -92,11 +93,11 @@ class ForwardOperator(object):
         return self._get_state_fn()
 
     @classmethod
-    def krylov(cls, forward_fn, adjoint_fn, gradient_fn,
-               set_state_fn, get_state_fn, measurements, degree=8):
-        import xarray as xr
+    def krylov(cls, forward_fn, adjoint_fn, gradient_fn, set_state_fn, get_state_fn, measurements,
+               degree=8, k_matrix_fn=None):
         def krylov_fn():
-            k_matrix = pynoisy.utils.get_krylov_matrix(measurements, forward_fn, degree)
+            k_matrix = pynoisy.utils.get_krylov_matrix(measurements, forward_fn, degree) if k_matrix_fn is None \
+                else k_matrix_fn(measurements, degree)
             coefs = np.linalg.lstsq(k_matrix.T, np.array(measurements).ravel(), rcond=None)[0]
             rec = np.dot(coefs.T, k_matrix).reshape(*measurements.shape)
             return xr.DataArray(rec, coords=measurements.coords)
@@ -286,13 +287,13 @@ class CallbackFn(object):
             self._callback_fn()
 
 
-def spatial_angle_gradient(solver, dx=1e-2):
+def spatial_angle_gradient(solver, dx=1e-5):
     """TODO"""
-    def gradient(solver, forward, adjoint, dx):
+    def gradient(solver, forward, adjoint, mask, dx):
         spatial_angle = solver.diffusion.spatial_angle.copy()
         source = solver.get_laplacian(forward)
         gradient = np.zeros(shape=solver.params.num_unknowns)
-        for n, (i, j) in enumerate(zip(*np.where(solver.params.mask))):
+        for n, (i, j) in enumerate(zip(*np.where(mask))):
             solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j] + dx
             source_ij = solver.get_laplacian(forward) - source
             solver.diffusion.spatial_angle[i, j] = spatial_angle[i, j]
@@ -300,18 +301,21 @@ def spatial_angle_gradient(solver, dx=1e-2):
             gradient[n] += (adjoint * source_ij).mean()
         return gradient
 
-    gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, dx)
+    mask = solver.params.mask if hasattr(solver.params, 'mask') else xr.ones_like(solver.diffusion.spatial_angle, dtype=np.bool)
+    gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, mask, dx)
     return gradient_fn
 
 def spatial_angle_set_state(solver):
     """TODO"""
-    def set_state(solver, state):
-        solver.diffusion.spatial_angle.values[solver.params.mask] = state
-    set_state_fn = lambda state: set_state(solver, state)
+    def set_state(solver, state, mask):
+        solver.diffusion.spatial_angle.values[mask] = state
+    mask = solver.params.mask if hasattr(solver.params, 'mask') else xr.ones_like(solver.diffusion.spatial_angle, dtype=np.bool)
+    set_state_fn = lambda state: set_state(solver, state, mask)
     return set_state_fn
 
-def spatial_angle_get_state(solver, mask=None):
+def spatial_angle_get_state(solver):
     """TODO"""
-    get_state_fn = lambda: solver.diffusion.spatial_angle.values[solver.params.mask]
+    mask = solver.params.mask if hasattr(solver.params, 'mask') else xr.ones_like(solver.diffusion.spatial_angle, dtype=np.bool)
+    get_state_fn = lambda: solver.diffusion.spatial_angle.values[mask]
     return get_state_fn
 

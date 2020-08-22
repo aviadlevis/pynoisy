@@ -66,14 +66,13 @@ def compare_movie_frames(frames1, frames2, scale='amp'):
         image1 = frames1[i]
         image2 = frames2[i]
 
-
         if scale == 'amp':
             image3 = np.abs(frames1[i] - frames2[i])
         elif scale == 'log':
             image3 = np.log(np.abs(frames1[i]/frames2[i]))
 
         for ax, img, title, cbar in zip(axes, [image1, image2, image3], titles, cbars):
-            ax.imshow(img.T)
+            ax.imshow(img, origin='lower')
             ax.set_title(title)
             cbar.mappable.set_clim([img.min(), img.max()])
 
