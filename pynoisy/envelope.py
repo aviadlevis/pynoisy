@@ -129,3 +129,15 @@ def disk(nx, ny, radius=0.2, decay=20):
     }
     envelope.attrs.update(new_attrs)
     return envelope
+
+def general_xy(nx, ny, scaling_radius=0.1):
+    radius = utils.get_grid(nx, ny).r
+    ir = scaling_radius / radius
+    small = 1e-10
+    envelope = (ir ** 4 * np.exp(-ir ** 2)).where(radius > scaling_radius / np.sqrt(np.log(1.0 / small))).fillna(0.0)
+    new_attrs = {
+        'envelope_model': 'general_xy',
+        'scaling_radius': scaling_radius
+    }
+    envelope.attrs.update(new_attrs)
+    return envelope

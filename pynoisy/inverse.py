@@ -203,7 +203,10 @@ class Optimizer(object):
                  method='L-BFGS-B',
                  options={'maxiter': 100, 'maxls': 100, 'disp': True, 'gtol': 1e-16, 'ftol': 1e-16}
                  ):
-        from scipy.optimize import minimize
+        if method == 'GD':
+            minimize = minimize_gradient_descent
+        else:
+            from scipy.optimize import minimize
         self._minimize = minimize
         self._method = method
         self._options = options
@@ -287,6 +290,84 @@ class CallbackFn(object):
             self._callback_fn()
 
 
+
+def minimize_gradient_descent(fun, x0, method='GD', jac=True, bounds=None, options=None, callback=None):
+    best_loss = np.inf
+    initial_step_size = options['initial_step_size'] if 'initial_step_size' in options else 1.0
+    maxls = options['maxls'] if 'maxls' in options else 10
+    disp = options['disp'] if 'disp' in options else False
+    maxiter = options['maxiter'] if 'maxiter' in options else 100
+    best_x = x0.copy()
+    x = x0.copy()
+    best_grad = np.zeros_like(x0)
+
+    for i in range(maxiter):
+        loss, gradient = fun(x)
+        if loss < best_loss:
+            num_ls = 0
+            step_size = initial_step_size
+            best_x = x.copy()
+            best_loss = loss
+            best_grad = gradient.copy()
+            x -= step_size * gradient
+            if callback is not None:
+                callback(x)
+        else:
+            if num_ls > maxls:
+                print('Optimization complete max line search exceeded'.format(loss, best_loss))
+                break
+            step_size *= 0.75
+            x = best_x - step_size * best_grad
+            num_ls += 1
+
+        if disp is True:
+            print('Iter: {}   loss:{}   best_loss:{}    step_size:{}'.format(i, loss, best_loss, step_size))
+
+        if np.allclose(x, best_x):
+            print('Optimization complete (no loss improvement: current_loss={}, prev_loss={}'.format(loss, best_loss))
+            break
+
+    return best_loss, best_x
+
+def minimize_gradient_descent1(fun, x0, method='GD', jac=True, bounds=None, options=None, callback=None):
+    best_loss = np.inf
+    initial_step_size = options['initial_step_size'] if 'initial_step_size' in options else 1.0
+    maxls = options['maxls'] if 'maxls' in options else 10
+    step_size = initial_step_size
+    disp = options['disp'] if 'disp' in options else False
+    maxiter = options['maxiter'] if 'maxiter' in options else 100
+    best_x = x0.copy()
+    x = x0.copy()
+    best_grad = np.zeros_like(x0)
+    step_size_counter = 0
+    for i in range(maxiter):
+        loss, gradient = fun(x)
+        if loss < best_loss:
+            best_x = x.copy()
+            best_loss = loss
+            best_grad = gradient.copy()
+            x -= step_size * gradient
+            if callback is not None:
+                callback(x)
+            step_size_counter += 1
+            if step_size_counter == 5:
+                #step_size *= 2
+                step_size_counter = 0
+        else:
+            step_size_counter = 0
+            step_size *= 0.5
+            x = best_x - step_size * best_grad
+
+        if disp is True:
+            print('Iter: {}   loss:{}   best_loss:{}    step_size:{}'.format(i, loss, best_loss, step_size))
+
+        if np.allclose(x, best_x):
+            print('Optimization complete (no loss improvement: current_loss={}, prev_loss={}'.format(loss, best_loss))
+            break
+
+    return best_loss, best_x
+
+
 def spatial_angle_gradient(solver, dx=1e-5):
     """TODO"""
     def gradient(solver, forward, adjoint, mask, dx):
@@ -305,17 +386,20 @@ def spatial_angle_gradient(solver, dx=1e-5):
     gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, mask, dx)
     return gradient_fn
 
-def spatial_angle_set_state(solver):
+def spatial_angle_set_state(solver, modulo=None):
     """TODO"""
     def set_state(solver, state, mask):
-        solver.diffusion.spatial_angle.values[mask] = state
+        solver.diffusion.spatial_angle.values[mask==True] = state
     mask = solver.params.mask if hasattr(solver.params, 'mask') else xr.ones_like(solver.diffusion.spatial_angle, dtype=np.bool)
-    set_state_fn = lambda state: set_state(solver, state, mask)
+    if modulo is None:
+        set_state_fn = lambda state: set_state(solver, state, mask)
+    else:
+        set_state_fn = lambda state: set_state(solver, np.mod(state, modulo), mask)
     return set_state_fn
 
 def spatial_angle_get_state(solver):
     """TODO"""
     mask = solver.params.mask if hasattr(solver.params, 'mask') else xr.ones_like(solver.diffusion.spatial_angle, dtype=np.bool)
-    get_state_fn = lambda: solver.diffusion.spatial_angle.values[mask]
+    get_state_fn = lambda: solver.diffusion.spatial_angle.values[mask == True]
     return get_state_fn
 

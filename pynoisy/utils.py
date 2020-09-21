@@ -166,7 +166,7 @@ class noisy_methods(object):
         ax.fill_between(x_range, mean + std, mean - std, facecolor='blue', alpha=0.5)
         ax.set_xlim([x_range.min(), x_range.max()])
         
-    def get_animation(self, vmin=None, vmax=None, fps=10, output=None):
+    def get_animation(self, vmin=None, vmax=None, fps=10, output=None, cmap='afmhot'):
         """TODO"""
         num_frames, nx, ny = self._obj.sizes.values()
         extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
@@ -181,7 +181,7 @@ class noisy_methods(object):
             return [im]
 
         fig, ax = plt.subplots()
-        im = plt.imshow(np.zeros((nx, ny)), extent=extent, origin='lower')
+        im = plt.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
         plt.colorbar()
         vmin = self._obj.min() if vmin is None else vmin
         vmax = self._obj.max() if vmax is None else vmax

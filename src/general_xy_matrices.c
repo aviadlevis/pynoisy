@@ -63,11 +63,13 @@ static double get_spatial_angle(double x0, double x1, double x2, double param_rc
   return atan2(x2, x1) + param_theta;
 }
 
-static void get_velocity(double x0, double x1, double x2, double* v, double direction, double param_rct)
+static void get_velocity(double x0, double x1, double x2, double* v, double direction, double param_rct, double opening_angle)
 {
-  double omega = direction * w_keplerian(x0, x1, x2, param_rct);
-  v[0] = -x2 * omega;
-  v[1] = x1 * omega;
+  double omega = w_keplerian(x0, x1, x2, param_rct);
+  double theta = atan2(-x2, x1);
+  double magnitude = sqrt((x2*x2 + x1*x1) * omega*omega);
+  v[0] = direction * magnitude * sin(theta - opening_angle);
+  v[1] = direction * magnitude * cos(theta - opening_angle);
 }
 
 double param_env(double raw, double avg_raw, double var_raw,
@@ -179,12 +181,12 @@ void get_spatial_angle_image(int ni, int nj, double* spatial_angle_image, double
 }
 
 /* return velocity for the whole image */
-void get_velocity_image(int ni, int nj, double* velocity, double direction, double param_rct)
+void get_velocity_image(int ni, int nj, double* velocity, double direction, double param_rct, double opening_angle)
 {
       int i, j;
       double x0, x1, x2;
       double dx0, dx1, dx2;
-      void get_velocity(double x0, double x1, double x2, double va[2], double direction, double param_rct);
+      void get_velocity(double x0, double x1, double x2, double va[2], double direction, double param_rct, double opening_angle);
       model_set_spacing(&dx0, &dx1, &dx2, ni, nj, 1, 1, 1, 1);
       int k = 0;
       for (i = 0; i < ni; i++) {
@@ -192,7 +194,7 @@ void get_velocity_image(int ni, int nj, double* velocity, double direction, doub
             x0 = param_x0start + dx0 + 0;
             x1 = param_x1start + dx1 * i;
             x2 = param_x2start + dx2 * j;
-            get_velocity(x0, x1, x2, &velocity[k], direction, param_rct);
+            get_velocity(x0, x1, x2, &velocity[k], direction, param_rct, opening_angle);
             k=k+2;
         }
       }
@@ -206,3 +208,43 @@ void model_set_spacing(double* dx0, double* dx1, double* dx2,
   *dx2 = (param_x2end - param_x2start) / (npi * ni);
 }
 
+
+double get_env_image(double raw, double avg_raw, double var_raw,
+		 int i, int j, int k, int ni, int nj, int nk,
+		 int pi, int pj, int pk, double dx0, double dx1, double dx2)
+{
+  double radius, x, y;
+
+  x = param_x1start + (j + pj * nj) * dx1;
+  y = param_x2start + (i + pi * ni) * dx2;
+
+  radius = sqrt(x * x + y * y);
+
+  /* double sigma = 5.; */
+  /* return exp(-0.5 * radius * radius / (sigma * sigma))  */
+  /*   * (raw - avg_raw) / sqrt(var_raw) */
+  /*   / ( 2. * M_PI * sigma * sigma); */
+
+  /* if (radius >= param_rct) */
+  /*   return 3. * param_mdot * 5.67E46 // solar mass*c^2/year to erg/s */
+  /*     * ( 1. - sqrt( param_rct / radius ) ) */
+  /*     / (8. * M_PI * pow(radius, 3.) ) */
+  /*     * exp( 0.5 * (raw - avg_raw) / sqrt(var_raw) ); */
+  /* else */
+  /*   return 0.; */
+  /* /\* in erg/s per unit area (in M^2) *\/ */
+
+  /* env(r) = (r0 / r)^4 * e^(-r0^2 / r^2)
+     env falls off as r^-4 at large r, peak at r = r0 / sqrt(2) with a
+     value of 4/e^2 */
+  double r0 = 2.;
+  /* at r0 / sqrt( log(1/SMALL) )
+     env(r) = log(SMALL)^2*SMALL ~ 100 * SMALL */
+  if ( radius > r0 / sqrt( log(1. / SMALL) ) ) {
+    double ir = r0 / radius;
+    return pow(ir, 4.) * exp(-ir * ir)
+  	* exp ( 0.5 * (raw - avg_raw) / sqrt(var_raw) );
+  }
+  else
+    return 0.;
+}

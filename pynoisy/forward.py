@@ -246,7 +246,7 @@ class HGRFSolver(Solver):
         del self._param_file, self._src_file, self._output_file
 
     def run(self, maxiter=50, nrecur=1, evolution_length=0.1, source=None, verbose=2, num_frames=None, num_samples=1,
-            n_jobs=1, seed=None, solver_id=None, timer=False):
+            n_jobs=1, seed=None, solver_id=None, timer=False, std_scaling=True):
         """TODO"""
         seed = self.seed if seed is None else seed
         solver_id = self._solver_id if solver_id is None else solver_id
@@ -265,21 +265,26 @@ class HGRFSolver(Solver):
         assert ((num_frames is not None) or (source is not None)), \
             'If the source is unspecified, the number of frames should be specified.'
 
-        if (source is None) and (self.params.random_type == 'zigur'):
-            if not np.log2(num_frames).is_integer():
-                warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
-        else:
-            num_frames = source.sizes['t'] if source is not None else num_frames
-            if source is None:
-                source = self.sample_source(num_frames, evolution_length, num_samples, seed)
-                factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
-                scaling = np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
-                                  self.diffusion.correlation_length ** 2).clip(min=1e-10)
-                source = source * scaling
+        if (num_frames is not None) and (not np.log2(num_frames).is_integer()):
+            warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
 
-            mode = 'a' if solver_id == 3 else 'w'
-            source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
-            cmd.extend(['-source', self._src_file.name])
+        if source is None:
+            if self.params.random_type == 'zigur':
+                raise NotImplementedError
+            else:
+                source = self.sample_source(num_frames, evolution_length, num_samples, seed)
+        else:
+            num_frames = source.sizes['t']
+
+        if std_scaling:
+            factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
+            scaling = np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
+                              self.diffusion.correlation_length ** 2).clip(min=1e-10)
+            source = source * scaling
+
+        mode = 'a' if solver_id == 3 else 'w'
+        source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
+        cmd.extend(['-source', self._src_file.name])
 
         assert np.mod(num_frames, n_jobs) == 0, 'Num frames / n_jobs should be an integer'
         cmd.extend(['-nk', str(num_frames / n_jobs)])
@@ -318,8 +323,9 @@ class HGRFSolver(Solver):
     def get_spatial_angle_gradient(self, forward, adjoint, verbose=0, timer=False):
         adjoint.to_dataset(name='adjoint').to_netcdf(self._src_file.name, group='data', mode='w')
         output = self.run(solver_id=3, source=forward, verbose=verbose, timer=timer)
-        gradient = xr.DataArray(data=output.sum('t').data.T, coords=self.params.coords)
-        return output
+        scaling = self.nx * self.ny * output.sizes['t']
+        gradient = xr.DataArray(data=output.sum('t').data.T, coords=self.params.coords) / scaling
+        return gradient
 
 
 
