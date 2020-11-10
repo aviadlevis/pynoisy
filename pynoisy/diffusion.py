@@ -6,11 +6,14 @@ import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
 
-def grid(spatial_angle, correlation_time, correlation_length, tensor_ratio):
+def grid(spatial_angle, correlation_time, correlation_length, tensor_ratio, diffusion_coefficient=None):
     assert spatial_angle.shape == correlation_time.shape  == correlation_length.shape, \
         'shapes of (spatial_angle, correlation_time, correlation_length) have to match.'
     _grid = utils.get_grid(*spatial_angle.shape)
-    diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
+    if diffusion_coefficient is None:
+        diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
+    else:
+        correlation_length = np.sqrt(0.5 * diffusion_coefficient * correlation_time)
     diffusion = xr.Dataset(
         data_vars={
             'spatial_angle': (_grid.dims, spatial_angle),

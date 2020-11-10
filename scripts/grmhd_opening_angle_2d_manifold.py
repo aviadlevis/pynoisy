@@ -1,13 +1,9 @@
+import xarray as xr
 import pynoisy
 import numpy as np
 import argparse
 from tqdm import tqdm
-import xarray as xr
-import h5py
-import os
 import time
-import scipy as sci
-from scipy.sparse.linalg import lsqr
 
 
 def parse_arguments():
@@ -54,6 +50,10 @@ def parse_arguments():
                          type=int,
                          default=4,
                          help='(default value: %(default)s) Number of parallel jobs.')
+    parser.add_argument('--envelope_threshold',
+                         type=int,
+                         default=1e-8,
+                         help='(default value: %(default)s) Threshold for the envelope.')
 
     args = parser.parse_args()
     return args
@@ -74,57 +74,35 @@ def krylov_error_fn(solver, measurements, degree, n_jobs):
     error = random_field - measurements
     return error, random_field
 
-def load_grmhd(filepath, initial_frame, nt, nx, ny):
-    filename =  os.path.abspath(filepath).split('/')[-1][:-3]
+def resample_movie(movie, initial_frame, nt, nx, ny):
     assert initial_frame >= 0, 'Negative initial frame'
-    with h5py.File(filepath, 'r') as file:
-        frames = file['I'][:]
-    nt_, nx_, ny_ = frames.shape
-    assert (initial_frame + nt) < nt_, \
-        'Final frame: {} is out of bounds for input movie of length: {}'.format(initial_frame + nt, nt_)
+    assert (initial_frame + nt) < movie.t.size, 'Final frame: {} out of bounds for input of length: {}'.format(
+        initial_frame + nt, movie.t.size)
+    movie = movie[initial_frame:initial_frame + nt].interp_like(pynoisy.utils.get_grid(nx, ny))
+    movie.attrs.update({'initial_frame': initial_frame})
+    return movie
 
-    grid = pynoisy.utils.get_grid(nx_, ny_)
-    measurements = xr.DataArray(data=frames,
-                                coords={'x': grid.x,  'y': grid.y, 't': np.linspace(0, 0.1, nt_)},
-                                dims=['t', 'x', 'y'],
-                                attrs={'GRMHD': filename})
-
-    measurements = measurements[initial_frame:initial_frame + nt].interp_like(pynoisy.utils.get_grid(nx, ny))
-    measurements.attrs.update({'initial_frame': initial_frame})
+def random_center(measurements):
+    measurements = measurements.fillna(0.0)
+    measurements.loc[{'x': 0, 'y':0}] = np.random.randn(measurements.t.size)
     return measurements
-
-def estimate_envelope(grf, measurements, amplitude=1.0):
-    num_frames = measurements.sizes['t']
-    image_shape = (measurements.sizes['x'], measurements.sizes['y'])
-    b = measurements.data.ravel()
-    diagonals = np.exp(-amplitude * grf).data.reshape(num_frames, -1)
-    A = sci.sparse.diags(diagonals, offsets=np.arange(num_frames) * -diagonals.shape[1],
-                         shape=[diagonals.shape[1]*diagonals.shape[0], diagonals.shape[1]])
-    sol = lsqr(A,b)[0]
-    envelope = pynoisy.envelope.grid(data=sol.reshape(image_shape)).clip(min=0.0)
-    return envelope
-
 
 # Parse input arguments
 args = parse_arguments()
 
 # Load and resample measurements
-measurements = load_grmhd(args.filepath, args.initial_frame, args.nt, args.nx, args.ny)
+measurements = pynoisy.utils.load_grmhd(args.filepath)
+measurements = resample_movie(measurements, args.initial_frame, args.nt, args.nx, args.ny)
 
-# Generate initial GRF for envelope estimation
-# In general the envelope should be refined with updated GRF parameters, however, it is robust enough
-# For a single estimation with some initial GRF as a proxy
+# Define the GRF measurements as a logarithm, add random noise at pixel (0,0) for stability
+measurements_grf = np.log(measurements.where(measurements > args.envelope_threshold))
+measurements_grf = measurements_grf - measurements_grf.mean('t')
+measurements_grf = random_center(measurements_grf)
+
+
 advection = pynoisy.advection.general_xy(measurements.x.size, measurements.y.size, direction='cw')
 diffusion = pynoisy.diffusion.general_xy(measurements.x.size, measurements.y.size, opening_angle=-1.2)
 solver = pynoisy.forward.HGRFSolver(measurements.x.size, measurements.y.size, advection, diffusion)
-grf = solver.run(num_frames=measurements.t.size, n_jobs=args.n_jobs)
-envelope = estimate_envelope(grf, measurements)
-
-# Define the GRF measurements as a logarithm, add random noise at pixel (0,0) for stability
-measurements_grf = np.log((envelope.where(envelope>1e-8) / measurements.where(measurements>1e-8))).transpose(
-    't', 'x', 'y', transpose_coords=False).fillna(0.0)
-measurements_grf.loc[{'x': 0, 'y':0}] = np.random.randn(measurements_grf.t.size)
-
 
 # Generate the 2D Krylov loss manifold
 temporal_grid = np.linspace(-np.pi, np.pi, args.temporal_res)
@@ -145,7 +123,8 @@ dataset = xr.Dataset(
         'ny': measurements.y.size,
         'nt': measurements.t.size,
         'initial_frame': measurements.initial_frame,
-        'krylov_degree': args.deg
+        'krylov_degree': args.deg,
+        'envelope_threshold': args.envelope_threshold
     }
 )
 

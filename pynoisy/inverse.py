@@ -10,6 +10,7 @@ import xarray as xr
 from matplotlib.colors import Normalize
 import pynoisy.utils
 
+
 class SummaryWriter(tensorboardX.SummaryWriter):
     def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10, flush_secs=120,
                  filename_suffix='', write_to_disk=True, log_dir=None, **kwargs):
@@ -289,7 +290,34 @@ class CallbackFn(object):
             self.ckpt_time = time.time()
             self._callback_fn()
 
+def estimate_envelope(grf, measurements, amplitude=1.0):
+    """
+    Estimate the envelope function which multiplies a fixed (exponentiated) random field.
 
+    Parameters
+    ----------
+    grf: xr.DataArray(dims=['t', 'x', 'y']).
+        Same shape as the measurements.A Gaussian Random Field estimate.
+    measurements: xr.DataArray(dims=['t', 'x', 'y']).
+        Same shape as grf. The model is measurements = envelope * exp(amplitude * grf)
+    amplitude: float, default=1.0
+        Amplitude (rate of the exponent) of the GRF modulation
+
+    Returns
+    -------
+    envelope:  xr.DataArray(dims=['x', 'y'])
+    """
+    from scipy.sparse.linalg import lsqr
+    from scipy.sparse import diags
+    num_frames = measurements.sizes['t']
+    image_shape = (measurements.sizes['x'], measurements.sizes['y'])
+    b = measurements.data.ravel()
+    diagonals = np.exp(-amplitude * grf).data.reshape(num_frames, -1)
+    A = diags(diagonals, offsets=np.arange(num_frames) * -diagonals.shape[1],
+              shape=[diagonals.shape[1]*diagonals.shape[0], diagonals.shape[1]])
+    sol = lsqr(A,b)[0]
+    envelope = pynoisy.envelope.grid(data=sol.reshape(image_shape)).clip(min=0.0)
+    return envelope
 
 def minimize_gradient_descent(fun, x0, method='GD', jac=True, bounds=None, options=None, callback=None):
     best_loss = np.inf
@@ -329,44 +357,6 @@ def minimize_gradient_descent(fun, x0, method='GD', jac=True, bounds=None, optio
 
     return best_loss, best_x
 
-def minimize_gradient_descent1(fun, x0, method='GD', jac=True, bounds=None, options=None, callback=None):
-    best_loss = np.inf
-    initial_step_size = options['initial_step_size'] if 'initial_step_size' in options else 1.0
-    maxls = options['maxls'] if 'maxls' in options else 10
-    step_size = initial_step_size
-    disp = options['disp'] if 'disp' in options else False
-    maxiter = options['maxiter'] if 'maxiter' in options else 100
-    best_x = x0.copy()
-    x = x0.copy()
-    best_grad = np.zeros_like(x0)
-    step_size_counter = 0
-    for i in range(maxiter):
-        loss, gradient = fun(x)
-        if loss < best_loss:
-            best_x = x.copy()
-            best_loss = loss
-            best_grad = gradient.copy()
-            x -= step_size * gradient
-            if callback is not None:
-                callback(x)
-            step_size_counter += 1
-            if step_size_counter == 5:
-                #step_size *= 2
-                step_size_counter = 0
-        else:
-            step_size_counter = 0
-            step_size *= 0.5
-            x = best_x - step_size * best_grad
-
-        if disp is True:
-            print('Iter: {}   loss:{}   best_loss:{}    step_size:{}'.format(i, loss, best_loss, step_size))
-
-        if np.allclose(x, best_x):
-            print('Optimization complete (no loss improvement: current_loss={}, prev_loss={}'.format(loss, best_loss))
-            break
-
-    return best_loss, best_x
-
 
 def spatial_angle_gradient(solver, dx=1e-5):
     """TODO"""
@@ -386,6 +376,7 @@ def spatial_angle_gradient(solver, dx=1e-5):
     gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, mask, dx)
     return gradient_fn
 
+
 def spatial_angle_set_state(solver, modulo=None):
     """TODO"""
     def set_state(solver, state, mask):
@@ -396,6 +387,7 @@ def spatial_angle_set_state(solver, modulo=None):
     else:
         set_state_fn = lambda state: set_state(solver, np.mod(state, modulo), mask)
     return set_state_fn
+
 
 def spatial_angle_get_state(solver):
     """TODO"""

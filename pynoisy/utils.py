@@ -6,12 +6,34 @@ from matplotlib import animation
 from ipywidgets import interact, fixed, interactive
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
+import h5py
+import os
 
+uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
-def matern_covariance(length_scale):
+def krylov_residual(solver, measurements, degree, n_jobs=4):
+    error = krylov_error_fn(solver, measurements, degree, n_jobs)
+    loss = (error**2).mean()
+    return np.array(loss)
+
+def krylov_error_fn(solver, measurements, degree, n_jobs=4):
+    krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=False, n_jobs=n_jobs)
+    k_matrix = krylov.data.reshape(degree, -1)
+    result = np.linalg.lstsq(k_matrix.T, np.array(measurements).ravel(), rcond=-1)
+    coefs, residual = result[0], result[1]
+    random_field = np.dot(coefs.T, k_matrix).reshape(*measurements.shape)
+    error = random_field - measurements
+    return error
+
+def full_like(nx, ny, fill_value):
+    _grid = get_grid(nx, ny)
+    array = xr.full_like(xr.DataArray(coords=_grid.coords), fill_value=fill_value)
+    return array
+
+def matern_covariance(nx, ny, length_scale):
     from sklearn.gaussian_process.kernels import Matern
     kernel = Matern(length_scale=length_scale)
-    _grid = get_grid()
+    _grid = get_grid(nx, ny)
     x, y = np.meshgrid(_grid.x, _grid.y)
     covariance = kernel(np.array([x.ravel(), y.ravel()]).T)
     return covariance
@@ -109,6 +131,68 @@ def get_krylov_matrix(b, forward_fn, degree):
     return np.array(k_matrix)
 
 
+def load_grmhd(filepath):
+    """
+    Load an .h5 GRMHD movie frames
+
+    Parameters
+    ----------
+    filepath: str
+        path to .h5 file
+
+    Returns
+    -------
+    measurements: xr.DataArray(dims=['t', 'x', 'y'])
+        GRMHD measurements as an xarray object.
+    """
+    filename =  os.path.abspath(filepath).split('/')[-1][:-3]
+    with h5py.File(filepath, 'r') as file:
+        frames = file['I'][:]
+    nt_, nx_, ny_ = frames.shape
+    grid = get_grid(nx_, ny_)
+    measurements = xr.DataArray(data=frames,
+                                coords={'x': grid.x,  'y': grid.y, 't': np.linspace(0, 0.1, nt_)},
+                                dims=['t', 'x', 'y'],
+                                attrs={'GRMHD': filename})
+    return measurements
+
+
+def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, output=None, cmaps='viridis'):
+    """TODO"""
+    # animation function.  This is called sequentially
+    def animate(i):
+        for movie, im in zip(movie_list, images):
+            im.set_array(movie.isel(t=i))
+        return images
+
+    fig = plt.gcf()
+    num_frames, nx, ny = movie_list[0].sizes.values()
+    extent = [movie_list[0].x.min(), movie_list[0].x.max(), movie_list[0].y.min(), movie_list[0].y.max()]
+
+    # initialization function: plot the background of each frame
+    images = []
+    titles = [movie.name for movie in movie_list] if titles is None else titles
+    cmaps = [cmaps]*len(movie_list) if isinstance(cmaps, str) else cmaps
+
+    for movie, ax, title, cmap in zip(movie_list, axes, titles, cmaps):
+        if ticks == False:
+            ax.set_xticks([])
+            ax.set_yticks([])
+        ax.set_title(title)
+        im = ax.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        fig.colorbar(im, cax=cax)
+        im.set_clim(movie.min(), movie.max())
+        images.append(im)
+
+    plt.tight_layout()
+    anim = animation.FuncAnimation(fig, animate, frames=num_frames, interval=1e3 / fps)
+
+    if output is not None:
+        anim.save(output, writer='imagemagick', fps=fps)
+    return anim
+
 @xr.register_dataset_accessor("noisy_methods")
 @xr.register_dataarray_accessor("noisy_methods")
 class noisy_methods(object):
@@ -166,23 +250,24 @@ class noisy_methods(object):
         ax.fill_between(x_range, mean + std, mean - std, facecolor='blue', alpha=0.5)
         ax.set_xlim([x_range.min(), x_range.max()])
         
-    def get_animation(self, vmin=None, vmax=None, fps=10, output=None, cmap='afmhot'):
+    def get_animation(self, vmin=None, vmax=None, fps=10, output=None, cmap='afmhot', ax=None):
         """TODO"""
-        num_frames, nx, ny = self._obj.sizes.values()
-        extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
-        # initialization function: plot the background of each frame
-        def init():
-            im.set_data(np.zeros((nx, ny)), extent=extent, vmin=-1, vmax=1)
-            return [im]
-
         # animation function.  This is called sequentially
         def animate(i):
             im.set_array(self._obj.isel(t=i))
             return [im]
 
-        fig, ax = plt.subplots()
-        im = plt.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
-        plt.colorbar()
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = plt.gcf()
+
+        num_frames, nx, ny = self._obj.sizes.values()
+        extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
+
+        # initialization function: plot the background of each frame
+        im = ax.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
+        fig.colorbar(im)
         vmin = self._obj.min() if vmin is None else vmin
         vmax = self._obj.max() if vmax is None else vmax
         im.set_clim(vmin, vmax)
@@ -192,3 +277,13 @@ class noisy_methods(object):
             anim.save(output, writer='imagemagick', fps=fps)
         return anim
 
+    def update_angle_and_magnitude(self):
+        """TODO"""
+        angle = np.arctan2(self._obj.vy, self._obj.vx)
+        magnitude = np.sqrt(self._obj.vy ** 2 + self._obj.vx ** 2)
+        self._obj.update({'angle': angle, 'magnitude': magnitude})
+
+    def update_vx_vy(self):
+        """TODO"""
+        self._obj.vx[:] = np.cos(self._obj.angle) * self._obj.magnitude
+        self._obj.vy[:] = np.sin(self._obj.angle) * self._obj.magnitude
