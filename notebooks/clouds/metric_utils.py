@@ -53,34 +53,45 @@ def compute_krylov_loss(measurements, hyperparams, param_grid, degrees):
     return output
 
 
+def projection_residual(measurements, eigenvectors, degree, return_projection=False):
+    """
+    Compute projection residual of the measurements
+    """
+    vectors_reduced = eigenvectors.sel(deg=range(degree))
+    coefficients = (measurements * vectors_reduced).sum(['t', 'x', 'y'])
+    projection = (coefficients * vectors_reduced).sum('deg')
+
+    residual = ((measurements - projection) ** 2).sum(['t', 'x', 'y'])
+    residual.name = 'projection_residual'
+    residual = residual.expand_dims(deg=[degree])
+
+    if return_projection:
+        projection.name = 'projection'
+        projection = projection.expand_dims(deg=[degree])
+        residual = xr.merge([residual, projection])
+
+    return residual
+
+
 def likelihood_metrics(measurements, eigenvectors, degree):
     """
     Compute likelihood metrics for eigenvector projection
     """
-    likelihoods, quotients, logdets, projection_residuals = [], [], [], []
-    metric_dim = eigenvectors[0].dims[0]
-    for vectors in eigenvectors:
-        vectors_reduced = vectors.sel(deg=range(degree))
-        coefficients = (measurements * vectors_reduced).sum(['t','x','y'])
-        quotient = ((coefficients * vectors_reduced.eigenvalue)**2).sum(['deg'])
-        logdet = np.log(vectors_reduced.eigenvalue**2).sum().expand_dims(
-            {metric_dim: vectors_reduced[metric_dim]}
-        )
-        residual = ((measurements - coefficients*vectors_reduced)**2).sum(['deg','t','x','y'])
-        quotients.append(quotient)
-        logdets.append(logdet)
-        likelihoods.append(logdet + quotient)
-        projection_residuals.append(residual)
+    vectors_reduced = eigenvectors.sel(deg=range(degree)).eigenvectors
+    eigenvalues_reduced = eigenvectors.sel(deg=range(degree)).eigenvalues
+    coefficients = (measurements * vectors_reduced).sum(['t', 'x', 'y'])
+    projections = (coefficients * vectors_reduced).sum('deg')
+    residuals = ((measurements - projections) ** 2).sum(['t', 'x', 'y'])
+    quotients = ((coefficients * eigenvalues_reduced) ** 2).sum(['deg'])
+    logdets = np.log(eigenvalues_reduced ** 2).sum('deg')
+    likelihoods = logdets - quotients
 
-    likelihoods = xr.concat(likelihoods, dim=metric_dim)
-    logdets = xr.concat(logdets, dim=metric_dim)
-    quotients = xr.concat(quotients, dim=metric_dim)
-    projection_residuals = xr.concat(projection_residuals, dim=metric_dim)
     likelihoods.name = 'likelihood'
     quotients.name = 'quotient'
     logdets.name = 'logdet'
-    projection_residuals.name = 'projection_residual'
-    dataset = xr.merge([likelihoods, quotients, logdets, projection_residuals]).expand_dims({'degree': [degree]})
+    residuals.name = 'projection_residual'
+
+    dataset = xr.merge([likelihoods, quotients, logdets, residuals]).expand_dims(deg=[degree])
     return dataset
 
 

@@ -11,18 +11,41 @@ import os
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
+def projection_residual(measurements, eigenvectors, degree, return_projection=False):
+    """
+    Compute projection residual of the measurements
+    """
+    vectors_reduced = eigenvectors.sel(deg=range(degree))
+    coefficients = (measurements * vectors_reduced).sum(['t', 'x', 'y'])
+    projection = (coefficients * vectors_reduced).sum('deg')
+
+    residual = ((measurements - projection) ** 2).sum(['t', 'x', 'y'])
+    residual.name = 'projection_residual'
+    residual = residual.expand_dims(deg=[degree])
+
+    if return_projection:
+        projection.name = 'projection'
+        projection = projection.expand_dims(deg=[degree])
+        residual = xr.merge([residual, projection])
+
+    return residual
+
 def krylov_residual(solver, measurements, degree, n_jobs=4):
     error = krylov_error_fn(solver, measurements, degree, n_jobs)
     loss = (error**2).mean()
     return np.array(loss)
 
-def krylov_error_fn(solver, measurements, degree, n_jobs=4):
+def krylov_projection(solver, measurements, degree, n_jobs=4):
     krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=False, n_jobs=n_jobs)
     k_matrix = krylov.data.reshape(degree, -1)
     result = np.linalg.lstsq(k_matrix.T, np.array(measurements).ravel(), rcond=-1)
     coefs, residual = result[0], result[1]
-    random_field = np.dot(coefs.T, k_matrix).reshape(*measurements.shape)
-    error = random_field - measurements
+    projection = np.dot(coefs.T, k_matrix).reshape(*measurements.shape)
+    return projection
+
+def krylov_error_fn(solver, measurements, degree, n_jobs=4):
+    projection = krylov_projection(solver, measurements, degree, n_jobs)
+    error = projection - measurements
     return error
 
 def full_like(nx, ny, fill_value):

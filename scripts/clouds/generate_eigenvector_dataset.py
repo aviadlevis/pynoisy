@@ -7,7 +7,6 @@ import time
 import os
 import yaml
 import itertools
-import utils
 
 def parse_arguments():
     """Parse the command-line arguments for each run.
@@ -38,7 +37,7 @@ def parse_arguments():
                          default=24,
                          help='(default value: %(default)s) Degree of eigenvectors/modes.')
     parser.add_argument('--lobpcg_iter',
-                        default=30,
+                        default=50,
                         help='(default value: %(default)s) maximum number of LOBPCG iterations.')
     parser.add_argument('--precond',
                         default=True,
@@ -67,42 +66,48 @@ if __name__ == "__main__":
     )
 
     hyperparams = {'nt': [args.nt], 'nx': [args.nx], 'ny': [args.ny]}
+    dims_to_expand = []
     for param, value in config['params'].items():
         if (value == 'grid'):
             hyperparams[param] = np.linspace(*config['ranges'][param], config['grid'][param])
+            dims_to_expand.append(param)
         elif (value == 'random'):
-            hyperparams[param] = [uniform_sample(*config['ranges'][param])]
+            hyperparams[param] = [pynoisy.utils.uniform_sample(*config['ranges'][param])]
             filename += '_{}{:1.3}'.format(param, hyperparams[param][0])
         else:
             hyperparams[param] = [value]
 
-    # Save a NetCDF file with groups
+    # Save a NetCDF file
     if os.path.isdir(args.output_dir) is False:
         os.mkdir(args.output_dir)
 
     # Split parameter grid to number of files
+    output = os.path.join(args.output_dir, filename)
     parameter_grid = list(itertools.product(*hyperparams.values()))
     for num_file, param_split in enumerate(tqdm(np.array_split(parameter_grid, config['run']['num_files']), desc='file')):
-        output = os.path.join(args.output_dir, filename + '_{:03}.nc'.format(num_file))
-        xr.Dataset(
-            hyperparams,
-            attrs={'runname': config['run']['name'],
-                   'file_num': '{:03} / {:03}'.format(num_file, config['run']['num_files']-1),
-                   'num_eigenvectors': len(param_split),
-                   'desc': config['run']['desc'],
-                   'date': time.strftime("%d-%b-%Y-%H:%M:%S"),
-                   'lobpcg_iter': args.lobpcg_iter,
-                   'preconditioning': 'True' if args.precond else 'False'}
-        ).to_netcdf(output, mode='w')
+        output = output + '_{:03}.nc'.format(num_file) if (config['run']['num_files'] > 1) else output + '.nc'
 
-
+        eigenvectors = []
         for i, parameters in enumerate(tqdm(param_split, leave=False)):
             parameter_dict = dict(zip(hyperparams.keys(), parameters))
-            solver = utils.create_solver(**parameter_dict)
+            solver = pynoisy.forward.HGRFSolver.homogeneous(**parameter_dict)
             grf = solver.run(num_frames=int(parameter_dict['nt']), n_jobs=4, evolution_length=parameter_dict['evolution_length'], verbose=False)
             eigenvector = solver.get_eigenvectors(grf, degree=args.degree, precond=args.precond, verbose=False, maxiter=args.lobpcg_iter)
             eigenvector.coords.update(parameter_dict)
-            eigenvector.to_netcdf(output, group='mode{}'.format(i), mode='a')
+            eigenvector = eigenvector.expand_dims(dims_to_expand)
+            eigenvectors.append(eigenvector)
+
+        eigenvectors = xr.concat(eigenvectors, dim=dims_to_expand[0])
+        eigenvectors.attrs = {
+            'runname': config['run']['name'],
+            'file_num': '{:03} / {:03}'.format(num_file, config['run']['num_files']-1),
+            'num_eigenvectors': len(param_split),
+            'desc': config['run']['desc'],
+            'date': time.strftime("%d-%b-%Y-%H:%M:%S"),
+            'lobpcg_iter': args.lobpcg_iter,
+            'preconditioning': 'True' if args.precond else 'False'
+        }
+        eigenvectors.to_netcdf(output, mode='w')
 
 
 

@@ -301,6 +301,7 @@ class HGRFSolver(Solver):
                 source = self.sample_source(num_frames, evolution_length, num_samples, seed)
         else:
             num_frames = source.sizes['t']
+            evolution_length = source.t.max().data
 
         n_jobs, proccesing_cmd = self.parallel_processing_cmd(num_frames, n_jobs, nprocx, nprocy, nproct)
         cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-seed', str(seed), '-output', output,
@@ -354,7 +355,7 @@ class HGRFSolver(Solver):
             output.name = 'krylov subspace'
 
         if (nrecur == 1) and (solver_id < 2):
-            output = output.squeeze('deg')
+            output = output.squeeze('deg').drop_vars('deg')
             output.name = 'grf'
 
         if (num_samples > 1):
