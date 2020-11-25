@@ -11,6 +11,15 @@ import os
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
+def save_complex(dataset, *args, **kwargs):
+    ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
+    ds = xr.concat([ds.real, ds.imag], dim='reim')
+    return ds.to_netcdf(*args, **kwargs)
+
+def read_complex(*args, **kwargs):
+    ds = xr.open_dataset(*args, **kwargs)
+    return ds.isel(reim=0) + 1j * ds.isel(reim=1)
+
 def projection_residual(measurements, eigenvectors, degree, return_projection=False):
     """
     Compute projection residual of the measurements
@@ -35,12 +44,16 @@ def krylov_residual(solver, measurements, degree, n_jobs=4):
     loss = (error**2).mean()
     return np.array(loss)
 
+def least_squares_projection(y, A):
+    result = np.linalg.lstsq(A.T, np.array(y).ravel(), rcond=-1)
+    coefs, residual = result[0], result[1]
+    projection = np.dot(coefs.T, A).reshape(*y.shape)
+    return projection
+
 def krylov_projection(solver, measurements, degree, n_jobs=4):
     krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=False, n_jobs=n_jobs)
     k_matrix = krylov.data.reshape(degree, -1)
-    result = np.linalg.lstsq(k_matrix.T, np.array(measurements).ravel(), rcond=-1)
-    coefs, residual = result[0], result[1]
-    projection = np.dot(coefs.T, k_matrix).reshape(*measurements.shape)
+    projection = least_squares_projection(measurements, k_matrix)
     return projection
 
 def krylov_error_fn(solver, measurements, degree, n_jobs=4):

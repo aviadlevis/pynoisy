@@ -1,4 +1,5 @@
 import ehtim as eh
+import ehtim.const_def as ehc
 import numpy as np
 import os
 from scipy.ndimage import median_filter
@@ -8,32 +9,65 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import pynoisy
 
-def load_sgra_obs(ehtim_home, uvfits_path):
-    """Load SgrA observations.
+
+def xarray_to_hdf5(movie, obs, fov, flipy=True):
+    """Transform xarray to and HDF5 movie
 
     Args:
-        eht_home (str):  Directory where eht-imaging library is located.
-        uvfits_path (str): Relative path from the eht_home directory to the observation file.
+        movie (xr.DataArray): a dataarray with dims=['t', 'x', 'y']
+        obs (Obsdata):  observation object
+        fov (float): Field of view in micro arc secs (UAS)
+        flipy (bool): Flip y-axis due to ehtim y axis flip
 
     Returns:
-        obs_sgra (Obsdata): observation object
+        output (Movie): a ehtim movie object
     """
-    obsfilename = os.path.join(ehtim_home, uvfits_path)
-    obs_sgra = eh.obsdata.load_uvfits(obsfilename, remove_nan=True)
+    mjd = obs.mjd  # modified julian date of observation
+    ra  = obs.ra   # ra of the source
+    dec = obs.dec  # dec of the source
+    rf  = obs.rf   # reference frequency observing at corresponding to 1.3 mm wavelength
+
+    start_time = obs.tstart
+    end_time = obs.tstop
+    num_frames = movie.sizes['t']
+    times = np.linspace(start_time, end_time, num_frames)
+
+    im_list = []
+    for i, time in enumerate(times):
+        frame = movie.isel(t=i)
+        image = eh.image.make_empty(frame.sizes['x'], fov * ehc.RADPERUAS, ra, dec, rf, mjd=mjd, source=obs.source)
+        image.time = time
+        ivec = np.flipud(frame).ravel() if flipy else frame.data.ravel()
+        image.ivec = ivec
+        im_list.append(image)
+
+    return eh.movie.merge_im_list(im_list)
+
+def load_obs(array_path, uvfits_path):
+    """Load observations.
+
+    Args:
+        array_path (str): path to array txt file.
+        uvfits_path (str): path to the observation file.
+
+    Returns:
+        obs (Obsdata): observation object
+    """
+    obs = eh.obsdata.load_uvfits(uvfits_path, remove_nan=True)
 
     # Load telescope site locations and SEFDs (how noisy they are)
-    eht = eh.array.load_txt(os.path.join(ehtim_home, 'arrays/EHT2017_m87.txt'))
+    eht = eh.array.load_txt(array_path)
 
     # Copy the correct mount types
-    t_obs = list(obs_sgra.tarr['site'])
+    t_obs = list(obs.tarr['site'])
     t_eht = list(eht.tarr['site'])
     t_conv = {'AA': 'ALMA', 'AP': 'APEX', 'SM': 'SMA', 'JC': 'JCMT', 'AZ': 'SMT', 'LM': 'LMT', 'PV': 'PV', 'SP': 'SPT'}
     for t in t_conv.keys():
-        if t in obs_sgra.tarr['site']:
+        if t in obs.tarr['site']:
             for key in ['fr_par', 'fr_elev', 'fr_off']:
-                obs_sgra.tarr[key][t_obs.index(t)] = eht.tarr[key][t_eht.index(t_conv[t])]
+                obs.tarr[key][t_obs.index(t)] = eht.tarr[key][t_eht.index(t_conv[t])]
 
-    return obs_sgra
+    return obs
 
 def ehtim_movie(frames, obs_sgra, total_flux=2.23, normalize_flux=True, fov=125, fov_units='uas',
                 start_time=None, end_time=None, std_threshold=8, median_size=5,

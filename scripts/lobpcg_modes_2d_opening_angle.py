@@ -58,7 +58,7 @@ if os.path.isdir(args.output_dir) is False:
 with open(os.path.join(args.output_dir, 'commandline_args.txt'), 'w') as f:
     json.dump(args.__dict__, f, indent=2)
 
-filename = 'modes1.LOBPCGiter{iter}.degree{degree}.precond_{precond}.{nt}x{nx}x{ny}'.format(
+filename = 'modes.LOBPCGiter{iter}.degree{degree}.precond_{precond}.{nt}x{nx}x{ny}'.format(
     iter=args.lobpcg_iter,
     degree=args.degree,
     precond=args.precond,
@@ -74,10 +74,8 @@ solver = pynoisy.forward.HGRFSolver(args.nx, args.ny, advection, diffusion)
 grf = solver.run(num_frames=args.nt, n_jobs=4, verbose=False)
 
 
-#temporal_grid = np.linspace(-np.pi, np.pi, args.temporal_res)
-#spatial_grid = np.linspace(-np.pi/2, np.pi/2, args.spatial_res)
-temporal_grid = np.linspace(-np.pi + 2 * np.pi / 38, np.pi - 2 * np.pi / 38, 19)
-spatial_grid = np.linspace(-np.pi/2 + np.pi / 38, np.pi/2 - np.pi / 38, 19)
+temporal_grid = np.linspace(-np.pi, np.pi, args.temporal_res)
+spatial_grid = np.linspace(-np.pi/2, np.pi/2, args.spatial_res)
 
 for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
     eigenvectors = []
@@ -85,7 +83,7 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
         solver.update_diffusion(pynoisy.diffusion.general_xy(solver.nx, solver.ny, opening_angle=spatial_angle))
         solver.update_advection(pynoisy.advection.general_xy(solver.nx, solver.ny, opening_angle=temporal_angle))
         eigenvector = solver.get_eigenvectors(grf, degree=args.degree, precond=args.precond, verbose=False, maxiter=args.lobpcg_iter)
-        eigenvector = eigenvector.eigenvectors.expand_dims({'temporal_angle': [temporal_angle]})
+        eigenvector = eigenvector.expand_dims({'temporal_angle': [temporal_angle]})
         eigenvectors.append(eigenvector)
 
     eigenvectors = xr.concat(eigenvectors, dim='temporal_angle')
