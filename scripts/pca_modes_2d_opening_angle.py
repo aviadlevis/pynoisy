@@ -4,8 +4,6 @@ import numpy as np
 import argparse
 from tqdm import tqdm
 import time, os, json
-import shutil
-
 
 def parse_arguments():
     """Parse the command-line arguments for each run.
@@ -47,18 +45,17 @@ def parse_arguments():
                          help='(default value: %(default)s) Number of data-points for the advection opening angle.')
     parser.add_argument('--degree',
                          type=int,
-                         default=20,
+                         default=40,
                          help='(default value: %(default)s) Krylov dimensionality degree.')
     parser.add_argument('--blocksize',
                          type=int,
-                         default=1,
+                         default=40,
                          help='(default value: %(default)s) Blocksize for LOBPCG.')
     parser.add_argument('--lobpcg_iter',
-                        default=5000,
+                        default=100,
                         help='(default value: %(default)s) maximum number of LOBPCG iterations.')
     parser.add_argument('--tol',
-                        default=10.0,
-                        type=float,
+                        default=1.0,
                         help='(default value: %(default)s) Stop criteria for LOBPCG iterations.')
     parser.add_argument('--precond',
                         default=False,
@@ -75,9 +72,7 @@ def parse_arguments():
     parser.add_argument('--verbose',
                         default=0,
                         help='(default value: %(default)s) Level of verbosity .')
-    parser.add_argument('--max_deflation_attempts',
-                        default=5,
-                        help='(default value: %(default)s) Level of verbosity .')
+
 
 
     args = parser.parse_args()
@@ -116,35 +111,30 @@ print('Starting iterations: deflation={}, blocksize={}, std_scaling={}, precondi
     args.deflate, args.blocksize, args.std_scaling, args.precond))
 for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
     eigenvectors = []
-    if i < 18:
-        continue
     for j, temporal_angle in enumerate(tqdm(temporal_grid, desc='temporal_grid', leave=False)):
         diffusion = pynoisy.diffusion.general_xy(args.nx, args.ny, opening_angle=spatial_angle)
         advection = pynoisy.advection.general_xy(args.nx, args.ny, opening_angle=temporal_angle)
-        diffusion.correlation_time[:] = diffusion.correlation_time.mean()
-        diffusion.correlation_length[:] = diffusion.correlation_length.mean()
-        advection.magnitude[:] = 0.2
-        advection.noisy_methods.update_vx_vy()
         solver = pynoisy.forward.HGRFSolver(args.nx, args.ny, advection, diffusion, seed=args.seed)
 
         if args.deflate:
+            if (args.nx == 32) and (args.ny == 32) and (i >= 7) and (i <= 11) and (((j >= 4) and (j <= 6)) or ((j >= 13) and (j <= 15))):
+                continue
             eigenvector = solver.get_eigenvectors_deflation(num_frames=args.nt, blocksize=args.blocksize , tol=args.tol,
                                                             degree=args.degree, precond=args.precond, verbose=args.verbose,
                                                             maxiter=args.lobpcg_iter, std_scaling=args.std_scaling,
-                                                            n_jobs=args.n_jobs, max_attempt=args.max_deflation_attempts)
+                                                            n_jobs=args.n_jobs)
 
         else:
             eigenvector = solver.get_eigenvectors(num_frames=args.nt, blocksize=args.blocksize , tol=args.tol,
                                                   precond=args.precond, verbose=args.verbose, n_jobs=args.n_jobs,
                                                   maxiter=args.lobpcg_iter, std_scaling=args.std_scaling)
 
-        if eigenvector is not None:
-            eigenvector = eigenvector.expand_dims({'temporal_angle': [temporal_angle]})
-            eigenvectors.append(eigenvector)
+        eigenvector = eigenvector.expand_dims({'temporal_angle': [temporal_angle]})
+        eigenvectors.append(eigenvector)
 
     eigenvectors = xr.concat(eigenvectors, dim='temporal_angle').expand_dims(spatial_angle=[spatial_angle])
     eigenvectors.attrs = {
-        'runname': 'modes for spatial and temporal opening angles [flat variability]',
+        'runname': 'modes for spatial and temporal opening angles',
         'file_num': '{:03} / {:03}'.format(i, len(spatial_grid)-1),
         'date': time.strftime("%d-%b-%Y-%H:%M:%S"),
         'lobpcg_iter': args.lobpcg_iter,
@@ -154,10 +144,6 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
         'std_scaling':  'True' if args.std_scaling else 'False',
         'initial_seed': args.seed,
         'tol': args.tol,
-        'n_jobs': args.n_jobs,
-        'max_deflation_attempts': args.max_deflation_attempts
+        'n_jobs': args.n_jobs
     }
     eigenvectors.to_netcdf(output.format(i), mode='w')
-
-# Copy the script for reproducibility of the experiment
-shutil.copy(__file__, os.path.join(args.output_dir, '[{}]script.py'.format(time.strftime("%d-%b-%Y-%H:%M:%S"))))

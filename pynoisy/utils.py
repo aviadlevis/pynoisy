@@ -9,7 +9,24 @@ from IPython.display import display
 import h5py
 import os
 
+
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
+
+def visualization_2d(residuals, ax, degree=None, contours=False):
+    dataset = residuals.sel(deg=degree) if degree else residuals
+    minimum = dataset[dataset.argmin(dim=['temporal_angle', 'spatial_angle'])].coords
+    dataset.plot(ax=ax, add_labels=False)
+    ax.scatter(minimum['temporal_angle'], minimum['spatial_angle'], s=100, c='r', marker='o', label='Global minima')
+    if hasattr(residuals, 'true_temporal_angle'):
+        ax.scatter(residuals.true_temporal_angle, residuals.true_spatial_angle, s=100, c='w', marker='^', label='True')
+    if contours:
+        cs = dataset.plot.contour(ax=ax, cmap='RdBu_r')
+        ax.clabel(cs, inline=1, fontsize=10)
+    ax.set_title('Residual Loss (degree={})'.format(int(dataset.deg)),fontsize=16)
+    ax.set_xlabel('Temporal angle [rad]', fontsize=12)
+    ax.set_ylabel('Spatial angle [rad]', fontsize=12)
+    ax.legend(facecolor='white', framealpha=0.4)
+
 
 def save_complex(dataset, *args, **kwargs):
     ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
@@ -20,7 +37,7 @@ def read_complex(*args, **kwargs):
     ds = xr.open_dataset(*args, **kwargs)
     return ds.isel(reim=0) + 1j * ds.isel(reim=1)
 
-def projection_residual(measurements, eigenvectors, degree, return_projection=False):
+def orthogonal_projection_residual(measurements, eigenvectors, degree, return_projection=False):
     """
     Compute projection residual of the measurements
     """
@@ -39,25 +56,40 @@ def projection_residual(measurements, eigenvectors, degree, return_projection=Fa
 
     return residual
 
-def krylov_residual(solver, measurements, degree, n_jobs=4):
-    error = krylov_error_fn(solver, measurements, degree, n_jobs)
+def krylov_residual(solver, measurements, degree, n_jobs=4, std_scaling=False):
+    error = krylov_error_fn(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
     loss = (error**2).mean()
     return np.array(loss)
 
+
 def least_squares_projection(y, A):
-    result = np.linalg.lstsq(A.T, np.array(y).ravel(), rcond=-1)
+    y_array = np.array(y).ravel()
+    y_mask = np.isfinite(y_array)
+    A_mask = np.isfinite(A)
+    assert np.equal(A_mask, y_mask[:, None]).all(), "Masks of A matrix and y are not identical"
+    projection = np.full_like(y_array, fill_value=np.nan)
+
+    A = A[A_mask].reshape(-1, A.shape[-1])
+    y_array = y_array[y_mask]
+    result = np.linalg.lstsq(A, y_array, rcond=-1)
     coefs, residual = result[0], result[1]
-    projection = np.dot(coefs.T, A).reshape(*y.shape)
+
+    projection[y_mask] = np.dot(A, coefs)
+    projection = projection.reshape(*y.shape)
+
+    if isinstance(y, xr.DataArray):
+        projection = xr.DataArray(projection, coords=y.coords)
+
     return projection
 
-def krylov_projection(solver, measurements, degree, n_jobs=4):
-    krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=False, n_jobs=n_jobs)
-    k_matrix = krylov.data.reshape(degree, -1)
+def krylov_projection(solver, measurements, degree, n_jobs=4, std_scaling=False):
+    krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=std_scaling, n_jobs=n_jobs)
+    k_matrix = krylov.data.reshape(degree, -1).T
     projection = least_squares_projection(measurements, k_matrix)
     return projection
 
-def krylov_error_fn(solver, measurements, degree, n_jobs=4):
-    projection = krylov_projection(solver, measurements, degree, n_jobs)
+def krylov_error_fn(solver, measurements, degree, n_jobs=4, std_scaling=False):
+    projection = krylov_projection(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
     error = projection - measurements
     return error
 
@@ -234,6 +266,12 @@ def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, outp
 class noisy_methods(object):
     def __init__(self, data_array):
         self._obj = data_array
+
+    def get_projection_matrix(self):
+        modes = self._obj.squeeze()
+        dims = ('t', 'x', 'y', 'deg')
+        matrix = modes.transpose(*dims).data.reshape(-1, modes.deg.size)
+        return matrix
 
     def get_tensor(self):
         tensor = noisy_core.get_diffusion_tensor(

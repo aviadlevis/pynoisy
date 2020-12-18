@@ -28,7 +28,10 @@ class Solver(object):
         self._diffusion = resampled_diffusion
         self._params = grid
         self._params.update({'forcing_strength': forcing_strength, 'seed': None})
-        self.reseed(seed)
+        if seed is None:
+            self.reseed()
+        else:
+            self._params['seed'] = seed
         warnings.resetwarnings()
 
     def reseed(self, seed=None):
@@ -277,8 +280,8 @@ class HGRFSolver(Solver):
         return n_jobs, cmd
 
 
-    def run(self, maxiter=50, nrecur=1, evolution_length=100.0, source=None, verbose=2, num_frames=None, num_samples=1,
-            n_jobs=1, seed=None, solver_id=None, timer=False, std_scaling=True, constrained=False, nprocx=1, nprocy=1, nproct=-1):
+    def run(self, maxiter=50, nrecur=1, evolution_length=100.0, source=None, verbose=2, num_frames=None, num_samples=1, tol=1e-6,
+            n_jobs=1, seed=None, solver_id=None, timer=False, std_scaling=True, constrained=False, vinit=0, nprocx=1, nprocy=1, nproct=-1):
         """TODO"""
         seed = self.seed if seed is None else seed
         solver_id = self._solver_id if solver_id is None else solver_id
@@ -304,35 +307,35 @@ class HGRFSolver(Solver):
             evolution_length = source.t.max().data
 
         n_jobs, proccesing_cmd = self.parallel_processing_cmd(num_frames, n_jobs, nprocx, nprocy, nproct)
-        cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-seed', str(seed), '-output', output,
+        cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-seed', str(seed), '-output', output, '-tol', str(tol),
                '-filename', filename, '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
                '-dump', '-params', self._param_file.name, '-solver', str(solver_id), '-tend', str(evolution_length)]
         cmd.extend(proccesing_cmd)
         if constrained:
             cmd.append('-constrained')
 
+        if vinit:
+            cmd.append('-vinit')
+
         if timer is True:
             cmd.append('-timer')
 
         if std_scaling:
-            factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
-            scaling = np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
-                              self.diffusion.correlation_length ** 2).clip(min=1e-10)
-            source = source * scaling
+            source = source * self.std_scaling_factor(nrecur)
 
-        mode = 'a' if ((solver_id==3) or (constrained)) else 'w'
+        mode = 'a' if ((solver_id==3) or (constrained) or (vinit)) else 'w'
         source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
         cmd.extend(['-source', self._src_file.name])
 
         subprocess.run(cmd)
 
         pixels = xr.load_dataset(self._output_file.name, group='data')
-        coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
-        dims = ['t', 'x', 'y']
+        coords = {'t': np.linspace(0, evolution_length, num_frames), 'y': self.params.y, 'x': self.params.x}
+        dims = ['t', 'y', 'x']
         attrs = {'seed': seed, 't units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
 
         if (solver_id == 4) or (solver_id == 5):
-            coords.update(deg=range(nrecur))
+            coords.update(deg=range(max(nrecur, vinit)))
             output = xr.Dataset(
                 coords=coords,
                 data_vars={
@@ -354,7 +357,7 @@ class HGRFSolver(Solver):
             output = xr.concat(movies, dim='deg')
             output.name = 'krylov subspace'
 
-        if (nrecur == 1) and (solver_id < 2):
+        if (nrecur == 1) and (solver_id < 3):
             output = output.squeeze('deg').drop_vars('deg')
             output.name = 'grf'
 
@@ -369,18 +372,82 @@ class HGRFSolver(Solver):
     def sample_source(self, num_frames, evolution_length=100.0, num_samples=1, seed=None):
         return super().sample_source(num_frames, evolution_length, num_samples, seed)
     
-    def get_laplacian(self, movie, verbose=0, timer=False):
-        return self.run(solver_id=2, evolution_length=movie.t.max().data, source=movie, verbose=verbose, timer=timer, std_scaling=False)
+    def get_laplacian(self, movie, verbose=0, timer=False, std_scaling=True):
+        return self.run(solver_id=2, evolution_length=movie.t.max().data, source=movie, verbose=verbose, timer=timer, std_scaling=std_scaling)
 
-    def get_eigenvectors(self, movie, eigenvectors=None, maxiter=100, degree=1, precond=True, verbose=0, timer=False, std_scaling=False):
+    def get_eigenvectors(self, num_frames=None, evolution_length=100.0, movie=None, eigenvector_init=None, blocksize=1, n_jobs=1,
+                         constraints=None, maxiter=100, precond=False, verbose=0, timer=False, std_scaling=False, tol=1.0, nprocx=1, nprocy=1, nproct=-1):
         solver_id = 5 if precond else 4
-        constrained = False
-        if eigenvectors is not None:
+        mode, constrained, vinit = 'w', False, 0
+
+        if constraints is not None:
+            (constraints.deg.max() + 1).to_dataset(name='num_constraints').to_netcdf(self._src_file.name, group='params', mode=mode)
             constrained = True
-            (eigenvectors.deg.max()+1).to_dataset(name='num_eigenvectors').to_netcdf(self._src_file.name, group='params', mode='w')
-            for deg in eigenvectors.deg:
-                eigenvectors.sel(deg=deg).to_dataset(name='eigenvector_{}'.format(deg.data)).to_netcdf(self._src_file.name, group='data', mode='a')
-        return self.run(solver_id=solver_id, maxiter=maxiter, evolution_length=movie.t.max().data, nrecur=degree, source=movie, verbose=verbose, timer=timer, std_scaling=std_scaling, constrained=constrained)
+            mode = 'a'
+            for deg in constraints.deg:
+                constraints.sel(deg=deg).to_dataset(name='constraint_{}'.format(deg.data)).to_netcdf(self._src_file.name, group='data', mode=mode)
+
+        if eigenvector_init is not None:
+            vinit = eigenvector_init.deg.size
+            (eigenvector_init.deg.max() + 1).to_dataset(name='num_init').to_netcdf(self._src_file.name, group='params', mode=mode)
+            mode = 'a'
+            for deg in eigenvector_init.deg:
+                eigenvector_init.sel(deg=deg).to_dataset(name='eigenvector_{}'.format(deg.data)).to_netcdf(self._src_file.name, group='data', mode=mode)
+
+        modes = self.run(solver_id=solver_id, num_frames=num_frames, maxiter=maxiter,
+                         evolution_length=evolution_length, nrecur=blocksize, source=movie,
+                         verbose=verbose, timer=timer, std_scaling=std_scaling,
+                         constrained=constrained, vinit=vinit, tol=tol, n_jobs=n_jobs,
+                         nprocx=nprocx, nprocy=nprocy, nproct=nproct)
+
+        if std_scaling:
+            modes['eigenvectors'] = modes.eigenvectors * self.std_scaling_factor()
+            modes['eigenvectors'] = modes.eigenvectors / np.sqrt((modes.eigenvectors ** 2).sum(['t', 'x', 'y']))
+
+        return modes
+
+
+    def get_eigenvectors_deflation(self, num_frames=None, evolution_length=100.0, movie=None, maxiter=100, degree=1, max_attempt=5,
+                         precond=False, verbose=0, timer=False, std_scaling=False, blocksize=1, tol=1.0, n_jobs=1, eigenvector_init=None, nprocx=1, nprocy=1, nproct=-1):
+        modes = None
+        num_modes = 0
+        constraints = None
+        missing_degrees = degree
+        evolution_length = movie.t.max().data if movie else evolution_length
+        fail_count = 0
+        while missing_degrees > 0:
+            if fail_count == max_attempt:
+                print('Error computing modes: fail count = {} reached maximum attempts allowed'.format(fail_count))
+                return None
+            additional_modes = self.get_eigenvectors(num_frames=num_frames, maxiter=maxiter, precond=precond,
+                                                     evolution_length=evolution_length, blocksize=blocksize, movie=movie,
+                                                     verbose=verbose, timer=timer, std_scaling=False, nprocx=nprocx, nprocy=nprocy, nproct=nproct,
+                                                     constraints=constraints, tol=tol, n_jobs=n_jobs, eigenvector_init=eigenvector_init)
+            eigenvector_init = None
+            additional_modes = additional_modes.where(additional_modes.residuals <= tol, drop=True)
+            additional_modes = additional_modes if additional_modes.deg.size > 0 else None
+            if additional_modes:
+                fail_count = 0
+                additional_modes.coords.update({'deg': range(num_modes, num_modes + additional_modes.deg.size)})
+                modes = additional_modes if modes is None else xr.concat([modes, additional_modes], dim='deg')
+                modes = modes.sortby('eigenvalues')
+                missing_degrees = degree - modes.deg.size
+                constraints = modes.eigenvectors
+                num_modes = modes.deg.size
+            else:
+                blocksize = np.clip(blocksize-1, 1, None)
+                print('Reducing blocksize to {}'.format(blocksize))
+                fail_count += 1
+                self.reseed()
+
+        modes.coords.update({'deg': range(modes.deg.size)})
+        modes = modes.isel(deg=range(degree))
+
+        if std_scaling:
+            modes['eigenvectors'] = modes.eigenvectors * self.std_scaling_factor()
+            modes['eigenvectors'] = modes.eigenvectors / np.sqrt((modes.eigenvectors ** 2).sum(['t', 'x', 'y']))
+
+        return modes
 
     def get_spatial_angle_gradient(self, forward, adjoint, verbose=0, timer=False):
         adjoint.to_dataset(name='adjoint').to_netcdf(self._src_file.name, group='data', mode='w')
@@ -415,6 +482,11 @@ class HGRFSolver(Solver):
         solver = cls(nx, ny, advection, diffusion)
         solver.params.attrs.update(kwargs)
         return solver
+
+    def std_scaling_factor(self, nrecur=1):
+        factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
+        return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
+                       self.diffusion.correlation_length ** 2).clip(min=1e-10)
 
 
 
