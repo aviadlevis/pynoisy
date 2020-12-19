@@ -31,7 +31,19 @@ def parse_arguments():
                          help='(default value: %(default)s) Number of video frames to use.')
     parser.add_argument('--n_jobs',
                          type=int,
-                         default=8,
+                         default=1,
+                         help='(default value: %(default)s) Number of jobs.')
+    parser.add_argument('--nprocx',
+                         type=int,
+                         default=1,
+                         help='(default value: %(default)s) Number of jobs.')
+    parser.add_argument('--nprocy',
+                         type=int,
+                         default=1,
+                         help='(default value: %(default)s) Number of jobs.')
+    parser.add_argument('--nproct',
+                         type=int,
+                         default=-1,
                          help='(default value: %(default)s) Number of jobs.')
     parser.add_argument('--spatial_res',
                          type=int,
@@ -132,9 +144,11 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
 
         if args.deflate:
             eigenvector = solver.get_eigenvectors_deflation(num_frames=args.nt, blocksize=args.blocksize , min_tol=args.min_tol,
-                                                            max_tol=args.max_tol, degree=args.degree, precond=args.precond, verbose=args.verbose,
-                                                            maxiter=args.lobpcg_iter, std_scaling=args.std_scaling,
-                                                            n_jobs=args.n_jobs, max_attempt=args.max_deflation_attempts)
+                                                            max_tol=args.max_tol, degree=args.degree, precond=args.precond,
+                                                            verbose=args.verbose, maxiter=args.lobpcg_iter,
+                                                            std_scaling=args.std_scaling, n_jobs=args.n_jobs,
+                                                            max_attempt=args.max_deflation_attempts,
+                                                            nprocx=args.nprocx, nprocy=args.nprocy, nproct=args.nproct)
 
         else:
             eigenvector = solver.get_eigenvectors(num_frames=args.nt, blocksize=args.blocksize , tol=args.min_tol,
