@@ -342,7 +342,8 @@ class HGRFSolver(Solver):
                     'eigenvectors': (['deg', 't', 'x', 'y'], [pixels['eigenvector_{}'.format(deg)].data for deg in coords['deg']]),
                     'eigenvalues': ('deg', [pixels['eigenvalue_{}'.format(deg)] for deg in coords['deg']]),
                     'residuals':  ('deg', [pixels['residual_{}'.format(deg)] for deg in coords['deg']])
-                }
+                },
+                attrs = {'min_residual': float(pixels['min_residual'])}
             )
 
         else:
@@ -407,27 +408,40 @@ class HGRFSolver(Solver):
         return modes
 
 
-    def get_eigenvectors_deflation(self, num_frames=None, evolution_length=100.0, movie=None, maxiter=100, degree=1, max_attempt=5,
-                         precond=False, verbose=0, timer=False, std_scaling=False, blocksize=1, tol=1.0, n_jobs=1, eigenvector_init=None, nprocx=1, nprocy=1, nproct=-1):
+    def get_eigenvectors_deflation(self, num_frames=None, evolution_length=100.0, movie=None, maxiter=100, degree=1,
+                                   max_attempt=5, precond=False, verbose=0, timer=False, std_scaling=False, blocksize=1,
+                                   min_tol=10.0, max_tol=30.0, n_jobs=1, eigenvector_init=None, nprocx=1, nprocy=1, nproct=-1):
         modes = None
         num_modes = 0
         constraints = None
         missing_degrees = degree
         evolution_length = movie.t.max().data if movie else evolution_length
         fail_count = 0
+        tol = min_tol
+
         while missing_degrees > 0:
             if fail_count == max_attempt:
                 print('Error computing modes: fail count = {} reached maximum attempts allowed'.format(fail_count))
-                return None
+                break
             additional_modes = self.get_eigenvectors(num_frames=num_frames, maxiter=maxiter, precond=precond,
                                                      evolution_length=evolution_length, blocksize=blocksize, movie=movie,
                                                      verbose=verbose, timer=timer, std_scaling=False, nprocx=nprocx, nprocy=nprocy, nproct=nproct,
                                                      constraints=constraints, tol=tol, n_jobs=n_jobs, eigenvector_init=eigenvector_init)
             eigenvector_init = None
-            additional_modes = additional_modes.where(additional_modes.residuals <= tol, drop=True)
-            additional_modes = additional_modes if additional_modes.deg.size > 0 else None
+            current_min_residual = additional_modes.min_residual
+
+            # Check that the residual minimum is the minimum over all iterations
+            if np.allclose(current_min_residual, additional_modes.residuals.min()):
+                additional_modes = additional_modes.where((additional_modes.residuals <= max_tol) and
+                                                          (additional_modes.eigenvalues > 0.0), drop=True)
+                additional_modes = additional_modes if additional_modes.deg.size > 0 else None
+            else:
+                tol = current_min_residual
+                continue
+
             if additional_modes:
                 fail_count = 0
+                tol = min_tol
                 additional_modes.coords.update({'deg': range(num_modes, num_modes + additional_modes.deg.size)})
                 modes = additional_modes if modes is None else xr.concat([modes, additional_modes], dim='deg')
                 modes = modes.sortby('eigenvalues')
@@ -440,12 +454,13 @@ class HGRFSolver(Solver):
                 fail_count += 1
                 self.reseed()
 
-        modes.coords.update({'deg': range(modes.deg.size)})
-        modes = modes.isel(deg=range(degree))
+        if modes is not None:
+            modes.coords.update({'deg': range(modes.deg.size)})
+            modes = modes.isel(deg=range(min(modes.deg.size, degree)))
 
-        if std_scaling:
-            modes['eigenvectors'] = modes.eigenvectors * self.std_scaling_factor()
-            modes['eigenvectors'] = modes.eigenvectors / np.sqrt((modes.eigenvectors ** 2).sum(['t', 'x', 'y']))
+            if std_scaling:
+                modes['eigenvectors'] = modes.eigenvectors * self.std_scaling_factor()
+                modes['eigenvectors'] = modes.eigenvectors / np.sqrt((modes.eigenvectors ** 2).sum(['t', 'x', 'y']))
 
         return modes
 

@@ -40,6 +40,7 @@ setup(
     packages = setuptools.find_packages(),
     include_dirs=[numpy.get_include()],
     install_requires=["numpy",
+                      "netcdf4",
                       "scipy",
                       "matplotlib",
                       "pandas",

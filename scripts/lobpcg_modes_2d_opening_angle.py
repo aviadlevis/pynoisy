@@ -54,10 +54,14 @@ def parse_arguments():
                          default=1,
                          help='(default value: %(default)s) Blocksize for LOBPCG.')
     parser.add_argument('--lobpcg_iter',
-                        default=5000,
+                        default=4000,
                         help='(default value: %(default)s) maximum number of LOBPCG iterations.')
-    parser.add_argument('--tol',
+    parser.add_argument('--min_tol',
                         default=10.0,
+                        type=float,
+                        help='(default value: %(default)s) Stop criteria for LOBPCG iterations.')
+    parser.add_argument('--max_tol',
+                        default=50.0,
                         type=float,
                         help='(default value: %(default)s) Stop criteria for LOBPCG iterations.')
     parser.add_argument('--precond',
@@ -93,11 +97,12 @@ if os.path.isdir(args.output_dir) is False:
 with open(os.path.join(args.output_dir, 'commandline_args.txt'), 'w') as f:
     json.dump(args.__dict__, f, indent=2)
 
-filename = 'modes.LOBPCGiter{iter}.blocksize{blocksize}.degree{degree}.tol{tol}.scaling{scaling}.deflate{deflate}.{nt}x{nx}x{ny}'.format(
+filename = 'modes.LOBPCGiter{iter}.blocksize{blocksize}.degree{degree}.tol{min_tol}-{max_tol}.scaling{scaling}.deflate{deflate}.{nt}x{nx}x{ny}'.format(
     iter=args.lobpcg_iter,
     blocksize=args.blocksize ,
     degree=args.degree,
-    tol=args.tol,
+    min_tol=args.min_tol,
+    max_tol=args.max_tol,
     scaling=args.std_scaling,
     deflate=args.deflate,
     nt=args.nt,
@@ -116,8 +121,6 @@ print('Starting iterations: deflation={}, blocksize={}, std_scaling={}, precondi
     args.deflate, args.blocksize, args.std_scaling, args.precond))
 for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
     eigenvectors = []
-    if i < 18:
-        continue
     for j, temporal_angle in enumerate(tqdm(temporal_grid, desc='temporal_grid', leave=False)):
         diffusion = pynoisy.diffusion.general_xy(args.nx, args.ny, opening_angle=spatial_angle)
         advection = pynoisy.advection.general_xy(args.nx, args.ny, opening_angle=temporal_angle)
@@ -153,7 +156,8 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
         'deflation': 'True' if args.deflate else 'False',
         'std_scaling':  'True' if args.std_scaling else 'False',
         'initial_seed': args.seed,
-        'tol': args.tol,
+        'min_tol': args.min_tol,
+        'max_tol': args.min_tol,
         'n_jobs': args.n_jobs,
         'max_deflation_attempts': args.max_deflation_attempts
     }
