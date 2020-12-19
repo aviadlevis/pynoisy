@@ -131,13 +131,13 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
         solver = pynoisy.forward.HGRFSolver(args.nx, args.ny, advection, diffusion, seed=args.seed)
 
         if args.deflate:
-            eigenvector = solver.get_eigenvectors_deflation(num_frames=args.nt, blocksize=args.blocksize , tol=args.tol,
-                                                            degree=args.degree, precond=args.precond, verbose=args.verbose,
+            eigenvector = solver.get_eigenvectors_deflation(num_frames=args.nt, blocksize=args.blocksize , min_tol=args.min_tol,
+                                                            max_tol=args.max_tol, degree=args.degree, precond=args.precond, verbose=args.verbose,
                                                             maxiter=args.lobpcg_iter, std_scaling=args.std_scaling,
                                                             n_jobs=args.n_jobs, max_attempt=args.max_deflation_attempts)
 
         else:
-            eigenvector = solver.get_eigenvectors(num_frames=args.nt, blocksize=args.blocksize , tol=args.tol,
+            eigenvector = solver.get_eigenvectors(num_frames=args.nt, blocksize=args.blocksize , tol=args.min_tol,
                                                   precond=args.precond, verbose=args.verbose, n_jobs=args.n_jobs,
                                                   maxiter=args.lobpcg_iter, std_scaling=args.std_scaling)
 
