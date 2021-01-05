@@ -444,7 +444,7 @@ class HGRFSolver(Solver):
                                                      constraints=constraints, tol=tol, n_jobs=n_jobs,
                                                      eigenvector_init=eigenvector_init, gevb=gevb)
 
-            if (additional_modes.min_residual < min_residual) and np.any(additional_modes.eigenvalues > 0.0):
+            if (additional_modes.min_residual < min_residual):
                 min_residual = additional_modes.min_residual
                 min_residual_seed = self.seed
 
