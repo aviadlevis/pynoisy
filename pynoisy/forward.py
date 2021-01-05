@@ -237,7 +237,7 @@ class HGRFSolver(Solver):
     solver_list = ['PCG', 'SMG']
     random_types = ['numpy', 'zigur']
 
-    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='SMG', random_type='numpy', executable='matrices'):
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy', executable='matrices'):
         super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
         assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
         assert random_type in self.random_types, 'Not supported random type: {}'.format(random_type)
@@ -280,7 +280,7 @@ class HGRFSolver(Solver):
         return n_jobs, cmd
 
 
-    def run(self, maxiter=50, nrecur=1, evolution_length=100.0, source=None, verbose=2, num_frames=None, num_samples=1, tol=1e-6,
+    def run(self, maxiter=50, nrecur=1, evolution_length=100.0, source=None, verbose=2, num_frames=None, num_samples=1, tol=1e-6, gevb=False,
             n_jobs=1, seed=None, solver_id=None, timer=False, std_scaling=True, constrained=False, vinit=0, nprocx=1, nprocy=1, nproct=-1):
         """TODO"""
         seed = self.seed if seed is None else seed
@@ -319,6 +319,9 @@ class HGRFSolver(Solver):
 
         if timer is True:
             cmd.append('-timer')
+
+        if gevb is True:
+            cmd.append('-gevb')
 
         if std_scaling:
             source = source * self.std_scaling_factor(nrecur)
@@ -376,7 +379,7 @@ class HGRFSolver(Solver):
     def get_laplacian(self, movie, verbose=0, timer=False, std_scaling=True):
         return self.run(solver_id=2, evolution_length=movie.t.max().data, source=movie, verbose=verbose, timer=timer, std_scaling=std_scaling)
 
-    def get_eigenvectors(self, num_frames=None, evolution_length=100.0, movie=None, eigenvector_init=None, blocksize=1, n_jobs=1,
+    def get_eigenvectors(self, num_frames=None, evolution_length=100.0, movie=None, eigenvector_init=None, blocksize=1, n_jobs=1, gevb=False,
                          constraints=None, maxiter=100, precond=False, verbose=0, timer=False, std_scaling=False, tol=1.0, nprocx=1, nprocy=1, nproct=-1):
         solver_id = 5 if precond else 4
         mode, constrained, vinit = 'w', False, 0
@@ -398,7 +401,7 @@ class HGRFSolver(Solver):
         modes = self.run(solver_id=solver_id, num_frames=num_frames, maxiter=maxiter,
                          evolution_length=evolution_length, nrecur=blocksize, source=movie,
                          verbose=verbose, timer=timer, std_scaling=std_scaling,
-                         constrained=constrained, vinit=vinit, tol=tol, n_jobs=n_jobs,
+                         constrained=constrained, gevb=gevb, vinit=vinit, tol=tol, n_jobs=n_jobs,
                          nprocx=nprocx, nprocy=nprocy, nproct=nproct)
 
         if std_scaling:
@@ -407,10 +410,11 @@ class HGRFSolver(Solver):
 
         return modes
 
-
     def get_eigenvectors_deflation(self, num_frames=None, evolution_length=100.0, movie=None, maxiter=100, degree=1,
                                    max_attempt=5, precond=False, verbose=0, timer=False, std_scaling=False, blocksize=1,
-                                   min_tol=10.0, max_tol=30.0, n_jobs=1, eigenvector_init=None, nprocx=1, nprocy=1, nproct=-1):
+                                   min_tol=10.0, max_tol=30.0, n_jobs=1, eigenvector_init=None, nprocx=1, nprocy=1,
+                                   nproct=-1,
+                                   gevb=False):
         modes = None
         num_modes = 0
         constraints = None
@@ -418,28 +422,38 @@ class HGRFSolver(Solver):
         evolution_length = movie.t.max().data if movie else evolution_length
         fail_count = 0
         tol = min_tol
+        min_residual = np.inf
+        min_residual_seed = self.seed
 
         while missing_degrees > 0:
+
             if fail_count == max_attempt:
-                print('Error computing modes: fail count = {} reached maximum attempts allowed'.format(fail_count))
-                break
+                if min_residual <= max_tol:
+                    print('reseeding to best seed')
+                    self.reseed(min_residual_seed)
+                    tol = min_residual
+                else:
+                    print('Error computing modes: fail count = {} reached maximum attempts allowed'.format(fail_count))
+                    break
+
             additional_modes = self.get_eigenvectors(num_frames=num_frames, maxiter=maxiter, precond=precond,
-                                                     evolution_length=evolution_length, blocksize=blocksize, movie=movie,
-                                                     verbose=verbose, timer=timer, std_scaling=False, nprocx=nprocx, nprocy=nprocy, nproct=nproct,
-                                                     constraints=constraints, tol=tol, n_jobs=n_jobs, eigenvector_init=eigenvector_init)
+                                                     evolution_length=evolution_length,
+                                                     blocksize=blocksize, movie=movie, verbose=verbose, timer=timer,
+                                                     std_scaling=False,
+                                                     nprocx=nprocx, nprocy=nprocy, nproct=nproct,
+                                                     constraints=constraints, tol=tol, n_jobs=n_jobs,
+                                                     eigenvector_init=eigenvector_init, gevb=gevb)
+
+            if (additional_modes.min_residual < min_residual) and np.any(additional_modes.eigenvalues > 0.0):
+                min_residual = additional_modes.min_residual
+                min_residual_seed = self.seed
+
             eigenvector_init = None
-            current_min_residual = additional_modes.min_residual
-
-            # Check that the residual minimum is the minimum over all iterations
-            if np.allclose(current_min_residual, additional_modes.residuals.min()):
-                additional_modes = additional_modes.where((additional_modes.residuals <= max_tol) and
-                                                          (additional_modes.eigenvalues > 0.0), drop=True)
-                additional_modes = additional_modes if additional_modes.deg.size > 0 else None
-            else:
-                tol = current_min_residual
-                continue
-
+            additional_modes = additional_modes.where(np.bitwise_and(additional_modes.residuals <= max_tol,
+                                                                     additional_modes.eigenvalues > 0.0), drop=True)
+            additional_modes = additional_modes if additional_modes.deg.size > 0 else None
             if additional_modes:
+                min_residual = np.inf
                 fail_count = 0
                 tol = min_tol
                 additional_modes.coords.update({'deg': range(num_modes, num_modes + additional_modes.deg.size)})
@@ -449,8 +463,10 @@ class HGRFSolver(Solver):
                 constraints = modes.eigenvectors
                 num_modes = modes.deg.size
             else:
-                blocksize = np.clip(blocksize-1, 1, None)
-                print('Reducing blocksize to {}'.format(blocksize))
+                # reduce blocksize if its not 1.
+                if blocksize > 1:
+                    blocksize = np.clip(blocksize - 1, 1, None)
+                    print('Reducing blocksize to {}'.format(blocksize))
                 fail_count += 1
                 self.reseed()
 

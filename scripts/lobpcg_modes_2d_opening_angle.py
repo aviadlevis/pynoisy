@@ -159,23 +159,26 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
             eigenvector = eigenvector.expand_dims({'temporal_angle': [temporal_angle]})
             eigenvectors.append(eigenvector)
 
-    eigenvectors = xr.concat(eigenvectors, dim='temporal_angle').expand_dims(spatial_angle=[spatial_angle])
-    eigenvectors.attrs = {
-        'runname': 'modes for spatial and temporal opening angles [flat variability]',
-        'file_num': '{:03} / {:03}'.format(i, len(spatial_grid)-1),
-        'date': time.strftime("%d-%b-%Y-%H:%M:%S"),
-        'lobpcg_iter': args.lobpcg_iter,
-        'blocksize': args.blocksize ,
-        'preconditioning': 'True' if args.precond else 'False',
-        'deflation': 'True' if args.deflate else 'False',
-        'std_scaling':  'True' if args.std_scaling else 'False',
-        'initial_seed': args.seed,
-        'min_tol': args.min_tol,
-        'max_tol': args.min_tol,
-        'n_jobs': args.n_jobs,
-        'max_deflation_attempts': args.max_deflation_attempts
-    }
-    eigenvectors.to_netcdf(output.format(i), mode='w')
+    if len(eigenvectors) > 0:
+        eigenvectors = xr.concat(eigenvectors, dim='temporal_angle').expand_dims(spatial_angle=[spatial_angle])
+        eigenvectors.attrs = {
+            'runname': 'modes for spatial and temporal opening angles [flat variability]',
+            'file_num': '{:03} / {:03}'.format(i, len(spatial_grid)-1),
+            'date': time.strftime("%d-%b-%Y-%H:%M:%S"),
+            'lobpcg_iter': args.lobpcg_iter,
+            'blocksize': args.blocksize ,
+            'preconditioning': 'True' if args.precond else 'False',
+            'deflation': 'True' if args.deflate else 'False',
+            'std_scaling':  'True' if args.std_scaling else 'False',
+            'initial_seed': args.seed,
+            'min_tol': args.min_tol,
+            'max_tol': args.max_tol,
+            'n_jobs': args.n_jobs,
+            'max_deflation_attempts': args.max_deflation_attempts
+        }
+        eigenvectors.to_netcdf(output.format(i), mode='w')
+    else:
+        print('\n Computation FAILED: no eigenvectors saved. \n')
 
 # Copy the script for reproducibility of the experiment
 shutil.copy(__file__, os.path.join(args.output_dir, '[{}]script.py'.format(time.strftime("%d-%b-%Y-%H:%M:%S"))))
