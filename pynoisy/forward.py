@@ -36,7 +36,7 @@ class Solver(object):
 
     def reseed(self, seed=None):
         # maximum seed is: 2**32 -1 = 4294967295
-        seed = np.random.seed(hash(time.time()) % 4294967295) if seed is None else seed
+        seed = hash(time.time()) % 4294967295 if seed is None else seed
         self._params['seed'] = seed
         print('Setting solver seed to: {}'.format(self.seed), end='\r')
 
