@@ -9,7 +9,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 import warnings
 import subprocess
-import os, tempfile
+import os, tempfile, time
 from scipy.special import gamma
 import pynoisy.advection
 import pynoisy.diffusion
@@ -35,7 +35,8 @@ class Solver(object):
         warnings.resetwarnings()
 
     def reseed(self, seed=None):
-        seed = np.random.randint(0, 32767) if seed is None else seed
+        # maximum seed is: 2**32 -1 = 4294967295
+        seed = np.random.seed(hash(time.time()) % 4294967295) if seed is None else seed
         self._params['seed'] = seed
         print('Setting solver seed to: {}'.format(self.seed), end='\r')
 
@@ -468,7 +469,9 @@ class HGRFSolver(Solver):
                     blocksize = np.clip(blocksize - 1, 1, None)
                     print('Reducing blocksize to {}'.format(blocksize))
                 fail_count += 1
+                print('Fail count: {}/{}\n \n'.format(fail_count, max_attempt))
                 self.reseed()
+
 
         if modes is not None:
             modes.coords.update({'deg': range(modes.deg.size)})
