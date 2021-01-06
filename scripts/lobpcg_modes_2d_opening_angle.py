@@ -67,6 +67,7 @@ def parse_arguments():
                          help='(default value: %(default)s) Blocksize for LOBPCG.')
     parser.add_argument('--lobpcg_iter',
                         default=4000,
+                        type=int,
                         help='(default value: %(default)s) maximum number of LOBPCG iterations.')
     parser.add_argument('--min_tol',
                         default=10.0,
@@ -90,10 +91,12 @@ def parse_arguments():
                         help='(default value: %(default)s) With or without deflation.')
     parser.add_argument('--verbose',
                         default=0,
+                        type=int,
                         help='(default value: %(default)s) Level of verbosity .')
-    parser.add_argument('--max_deflation_attempts',
+    parser.add_argument('--max_attempt',
+                        type=int,
                         default=5,
-                        help='(default value: %(default)s) Level of verbosity .')
+                        help='(default value: %(default)s) Maximum number of reseeding attempts.')
 
 
     args = parser.parse_args()
@@ -147,7 +150,7 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
                                                             max_tol=args.max_tol, degree=args.degree, precond=args.precond,
                                                             verbose=args.verbose, maxiter=args.lobpcg_iter,
                                                             std_scaling=args.std_scaling, n_jobs=args.n_jobs,
-                                                            max_attempt=args.max_deflation_attempts,
+                                                            max_attempt=args.max_attempt,
                                                             nprocx=args.nprocx, nprocy=args.nprocy, nproct=args.nproct)
 
         else:
@@ -174,7 +177,7 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
             'min_tol': args.min_tol,
             'max_tol': args.max_tol,
             'n_jobs': args.n_jobs,
-            'max_deflation_attempts': args.max_deflation_attempts
+            'max_reseeding_attempts': args.max_attempt
         }
         eigenvectors.to_netcdf(output.format(i), mode='w')
     else:

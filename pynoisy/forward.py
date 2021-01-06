@@ -38,7 +38,7 @@ class Solver(object):
         # maximum seed is: 2**32 -1 = 4294967295
         seed = hash(time.time()) % 4294967295 if seed is None else seed
         self._params['seed'] = seed
-        print('Setting solver seed to: {}'.format(self.seed), end='\r')
+        print('Setting solver seed to: {}'.format(self.seed))
 
     def update_advection(self, advection):
         """TODO"""
@@ -469,7 +469,7 @@ class HGRFSolver(Solver):
                     blocksize = np.clip(blocksize - 1, 1, None)
                     print('Reducing blocksize to {}'.format(blocksize))
                 fail_count += 1
-                print('Fail count: {}/{}\n \n'.format(fail_count, max_attempt))
+                print('Fail count: {}/{}'.format(fail_count, max_attempt))
                 self.reseed()
 
 
