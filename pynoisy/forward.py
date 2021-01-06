@@ -464,6 +464,9 @@ class HGRFSolver(Solver):
                 constraints = modes.eigenvectors
                 num_modes = modes.deg.size
             else:
+                if fail_count == max_attempt:
+                    print('Error computing modes: fail count = {} reached maximum attempts allowed'.format(fail_count))
+                    break
                 # reduce blocksize if its not 1.
                 if blocksize > 1:
                     blocksize = np.clip(blocksize - 1, 1, None)
