@@ -268,8 +268,15 @@ class noisy_methods(object):
         self._obj = data_array
 
     def get_projection_matrix(self):
-        modes = self._obj.squeeze()
         dims = ('t', 'x', 'y', 'deg')
+        modes = self._obj
+        potential_squeeze_dims = list(modes.dims)
+        potential_squeeze_dims.remove('deg')
+        squeeze_dims = []
+        for dim in potential_squeeze_dims:
+            if modes.sizes[dim] == 1:
+                squeeze_dims.append(dim)
+        modes = modes.squeeze(squeeze_dims)
         matrix = modes.transpose(*dims).data.reshape(-1, modes.deg.size)
         return matrix
 

@@ -56,7 +56,7 @@ def parse_arguments():
     parser.add_argument('--seed',
                          type=int,
                          default=5,
-                         help='(default value: %(default)s) Number of data-points for the advection opening angle.')
+                         help='(default value: %(default)s) Measurement seed.')
     parser.add_argument('--degree',
                          type=int,
                          default=20,

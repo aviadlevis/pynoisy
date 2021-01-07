@@ -35,9 +35,8 @@ class Solver(object):
         warnings.resetwarnings()
 
     def reseed(self, seed=None):
-        # maximum seed is: 2**32 -1 = 4294967295
-        seed = hash(time.time()) % 4294967295 if seed is None else seed
-        self._params['seed'] = seed
+        np.random.seed(hash(time.time()) % 4294967295)
+        self._params['seed'] = np.random.randint(0, 32767) if seed is None else seed
         print('Setting solver seed to: {}'.format(self.seed))
 
     def update_advection(self, advection):
