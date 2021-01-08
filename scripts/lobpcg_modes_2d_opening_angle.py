@@ -77,6 +77,10 @@ def parse_arguments():
                         default=50.0,
                         type=float,
                         help='(default value: %(default)s) Stop criteria for LOBPCG iterations.')
+    parser.add_argument('--advection_magnitude',
+                        default=0.2,
+                        type=float,
+                        help='(default value: %(default)s) Flat advection magnitude.')
     parser.add_argument('--precond',
                         default=False,
                         action='store_true',
@@ -137,13 +141,10 @@ print('Starting iterations: deflation={}, blocksize={}, std_scaling={}, precondi
 for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
     eigenvectors = []
     for j, temporal_angle in enumerate(tqdm(temporal_grid, desc='temporal_grid', leave=False)):
-        diffusion = pynoisy.diffusion.general_xy(args.nx, args.ny, opening_angle=spatial_angle)
-        advection = pynoisy.advection.general_xy(args.nx, args.ny, opening_angle=temporal_angle)
-        diffusion.correlation_time[:] = diffusion.correlation_time.mean()
-        diffusion.correlation_length[:] = diffusion.correlation_length.mean()
-        advection.magnitude[:] = 0.2
-        advection.noisy_methods.update_vx_vy()
-        solver = pynoisy.forward.HGRFSolver(args.nx, args.ny, advection, diffusion, seed=args.seed)
+        solver = pynoisy.forward.HGRFSolver.flat_variability(
+            args.nx, args.ny, temporal_angle=temporal_angle, spatial_angle=spatial_angle,
+            advection_magnitude=args.advection_magnitude, seed=args.seed
+        )
 
         if args.deflate:
             eigenvector = solver.get_eigenvectors_deflation(num_frames=args.nt, blocksize=args.blocksize , min_tol=args.min_tol,
@@ -177,7 +178,8 @@ for i, spatial_angle in enumerate(tqdm(spatial_grid, desc='spatial_grid')):
             'min_tol': args.min_tol,
             'max_tol': args.max_tol,
             'n_jobs': args.n_jobs,
-            'max_reseeding_attempts': args.max_attempt
+            'max_reseeding_attempts': args.max_attempt,
+            'advection_magnitude': args.advection_magnitude
         }
         eigenvectors.to_netcdf(output.format(i), mode='w')
     else:

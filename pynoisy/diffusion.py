@@ -145,7 +145,7 @@ def disk(nx, ny, tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
     diffusion.attrs.update(new_attrs)
     return diffusion
 
-def general_xy(nx, ny, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, scaling_radius=0.5):
+def general_xy(nx, ny, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, scaling_radius=0.5, flat_variability=False):
     """
     TODO
 
@@ -161,20 +161,35 @@ def general_xy(nx, ny, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor
         ratio for the diffusion tensor along the two principal axis.
     scaling_radius: float, default=0.5
         scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
+    flat_variability: bool
+        If flat_magnitude is set to True, the correlation_time and correlation_length is flattened to equal the mean
+        If flat_magnitude is set to False, the correlation_time and correlation_length varies radially
     """
-    diffusion = grid(
-        spatial_angle=hgrf_core.get_generalxy_spatial_angle(nx, ny, scaling_radius, opening_angle),
-        correlation_time=hgrf_core.get_generalxy_correlation_time(nx, ny, tau, scaling_radius),
-        correlation_length=hgrf_core.get_generalxy_correlation_length(nx, ny, scaling_radius, lam),
-        tensor_ratio=tensor_ratio
-    )
+    if type(flat_variability) != bool:
+        raise AttributeError
+
+    correlation_time = hgrf_core.get_generalxy_correlation_time(nx, ny, tau, scaling_radius)
+    correlation_length = hgrf_core.get_generalxy_correlation_length(nx, ny, scaling_radius, lam)
+    spatial_angle = hgrf_core.get_generalxy_spatial_angle(nx, ny, scaling_radius, opening_angle)
+
+    if flat_variability:
+        correlation_time[:] = correlation_time.mean()
+        correlation_length[:] = correlation_length.mean()
+
+    diffusion = grid(spatial_angle=spatial_angle,
+                     correlation_time=correlation_time,
+                     correlation_length=correlation_length,
+                     tensor_ratio=tensor_ratio)
+
     new_attrs = {
             'diffusion_model': 'general_xy',
             'opening_angle': opening_angle,
             'tau': tau,
             'lam': lam,
-            'scaling_radius': scaling_radius
+            'scaling_radius': scaling_radius,
+            'flat_variability': str(flat_variability)
     }
+
     diffusion.attrs.update(new_attrs)
     return diffusion
 

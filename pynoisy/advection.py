@@ -67,7 +67,7 @@ def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0):
     advection.noisy_methods.update_angle_and_magnitude()
     return advection
 
-def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0):
+def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0, flat_magnitude=False):
     """
     TODO
 
@@ -80,6 +80,10 @@ def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0):
     opening_angle: float, default=0.0
         This angle defines the opening angle respect to the local azimuthal angle.
         opening angle=0.0 is strictly rotational movement
+    flat_magnitude: bool or float
+        If flat_magnitude is set to True, the advection magnitude is flattened to equal the mean
+        If flat_magnitude is set to False the advection magnitude varies radially
+        If flat_magnitude is set to a scalar number this will be the magnitude of the advection
     """
     assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
     direction_value = -1 if direction == 'ccw' else 1
@@ -89,10 +93,18 @@ def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0):
         'advection_model': 'general_xy',
         'direction': direction,
         'scaling_radius': scaling_radius,
-        'opening_angle': opening_angle
+        'opening_angle': opening_angle,
+        'flat_magnitude': 'False'
     }
     advection.attrs.update(new_attrs)
     advection.noisy_methods.update_angle_and_magnitude()
+
+    if flat_magnitude:
+        flat_magnitude = advection.magnitude.mean() if flat_magnitude==True else flat_magnitude
+        advection.magnitude[:] = flat_magnitude
+        advection.noisy_methods.update_vx_vy()
+        advection.attrs.update(flat_magnitude=flat_magnitude)
+
     return advection
 
 def wind_sheer(nx, ny, angle, magnitude):

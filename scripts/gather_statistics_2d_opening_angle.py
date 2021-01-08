@@ -37,46 +37,25 @@ def parse_arguments():
     args = parser.parse_args()
     return args
 
-def flat_variability_solver(nx, ny, temporal_angle, spatial_angle, seed):
-    advection = pynoisy.advection.general_xy(nx, ny, opening_angle=temporal_angle)
-    diffusion = pynoisy.diffusion.general_xy(nx, ny, opening_angle=spatial_angle)
-    diffusion.correlation_time[:] = diffusion.correlation_time.mean()
-    diffusion.correlation_length[:] = diffusion.correlation_length.mean()
-    advection.magnitude[:] = 0.2
-    advection.noisy_methods.update_vx_vy()
-    solver = pynoisy.forward.HGRFSolver(nx, ny, advection, diffusion, seed=seed)
-    return solver
 
-def compute_residual(files, measurements, degree):
-    output = []
-    for file in tqdm(files, leave=False):
-        residual = []
-        modes = xr.load_dataset(file)
-        for temporal_angle in modes.temporal_angle:
-            eigenvectors = modes.sel(temporal_angle=temporal_angle).eigenvectors
-            projection_degree = min(degree, eigenvectors.deg.size)
-
-            projection_matrix = eigenvectors.isel(
-                deg=slice(projection_degree)).noisy_methods.get_projection_matrix()
-            projection = pynoisy.utils.least_squares_projection(measurements, projection_matrix)
-            res = np.linalg.norm(measurements - projection) ** 2
-            res = xr.DataArray(
-                [res], dims='temporal_angle',
-                coords={'temporal_angle': [temporal_angle]}).expand_dims(
-                deg=[degree], spatial_angle=eigenvectors.spatial_angle)
-            residual.append(res)
-        output.append(xr.concat(residual, dim='temporal_angle').sortby('temporal_angle'))
-    output = xr.concat(output, dim='spatial_angle').sortby('spatial_angle')
-    return output
 
 # Parse input arguments
 args = parse_arguments()
 
 directory = args.directory
 startswith = args.startswith
+
 files = [file for file in glob.glob(os.path.join(directory, '*.nc')) if file.split('/')[-1].startswith(startswith)]
-modes = xr.load_dataset(files[0])
-nt, nx, ny =  modes.t.size, modes.x.size, modes.y.size
+
+
+if (startswith == 'vismodes'):
+    from pynoisy import eht_functions as ehtf
+    modes = pynoisy.utils.read_complex(files[0])
+    obs = ehtf.load_obs(modes.array_path, modes.uvfits_path)
+    nt, nx, ny, fov = modes.modes_nt, modes.modes_nx, modes.modes_ny, modes.fov
+elif (startswith == 'modes'):
+    modes = xr.load_dataset(files[0])
+    nt, nx, ny =  modes.t.size, modes.x.size, modes.y.size
 
 seed = args.seed
 num_grid = args.num_grid
@@ -89,9 +68,17 @@ residual_stats = []
 for spatial_angle in tqdm(true_spatial_angle, desc='true spatial angle'):
     residuals = []
     for temporal_angle in tqdm(true_temporal_angle, desc='true temporal angle'):
-        solver = flat_variability_solver(nx, ny, temporal_angle, spatial_angle, seed)
+        solver = pynoisy.forward.HGRFSolver.flat_variability(
+            nx, ny, temporal_angle, spatial_angle, seed=args.seed
+        )
         measurements = solver.run(num_frames=nt, n_jobs=args.n_jobs, verbose=False)
-        output = compute_residual(files, measurements, args.degree)
+
+        if (startswith=='vismodes'):
+            movie = ehtf.xarray_to_hdf5(measurements, obs, fov=fov, flipy=False)
+            meas_obs = movie.observe_same_nonoise(obs)
+            measurements = meas_obs.data['vis']
+
+        output = pynoisy.utils.compute_residual(files, measurements, args.degree)
         residuals.append(output.expand_dims({'true_temporal_angle': [temporal_angle],
                                              'true_spatial_angle': [spatial_angle]}))
     residual_stats.append(xr.concat(residuals, dim='true_temporal_angle'))
@@ -107,5 +94,5 @@ residual_stats.attrs.update(
 
 # Save output NetCDF
 residual_stats.to_netcdf(
-    os.path.join(directory, 'residuals.stats.num_spatial{}.num_temporal{}.seed{}.degree{}.nc'.format(
-        residual_stats.true_spatial_angle.size, residual_stats.true_temporal_angle.size, seed, args.degree)))
+    os.path.join(directory, 'residuals.{}.stats.num_spatial{}.num_temporal{}.seed{}.degree{}.nc'.format(
+        startswith, residual_stats.true_spatial_angle.size, residual_stats.true_temporal_angle.size, seed, args.degree)))

@@ -8,11 +8,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
 import h5py
 import os
-
+from tqdm.notebook import tqdm
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
-def visualization_2d(residuals, ax, degree=None, contours=False):
+def visualization_2d(residuals, ax=None, degree=None, contours=False):
+    if ax is None:
+        fig, ax = plt.subplots(1,1, figsize=(5, 4))
     dataset = residuals.sel(deg=degree) if degree else residuals
     minimum = dataset[dataset.argmin(dim=['temporal_angle', 'spatial_angle'])].coords
     dataset.plot(ax=ax, add_labels=False)
@@ -22,11 +24,34 @@ def visualization_2d(residuals, ax, degree=None, contours=False):
     if contours:
         cs = dataset.plot.contour(ax=ax, cmap='RdBu_r')
         ax.clabel(cs, inline=1, fontsize=10)
-    ax.set_title('Residual Loss (degree={})'.format(int(dataset.deg)),fontsize=16)
+    ax.set_title('Residual Loss (degree={})'.format(int(dataset.deg.data)),fontsize=16)
     ax.set_xlabel('Temporal angle [rad]', fontsize=12)
     ax.set_ylabel('Spatial angle [rad]', fontsize=12)
     ax.legend(facecolor='white', framealpha=0.4)
 
+def compute_residual(files, measurements, degree):
+    if measurements.dtype == complex:
+        load_modes = read_complex
+    else:
+        load_modes = xr.load_dataset
+
+    residuals = []
+    for file in tqdm(files, leave=False):
+        residual = []
+        modes = load_modes(file)
+        degree = min(degree, modes.deg.size)
+        for temporal_angle in modes.temporal_angle:
+            eigenvectors = modes.vis if (measurements.dtype == complex) else modes.eigenvectors
+            projection_matrix = eigenvectors.sel(
+                temporal_angle=temporal_angle,
+                deg=slice(degree)).noisy_methods.get_projection_matrix()
+            projection = least_squares_projection(measurements, projection_matrix)
+            residual.append(np.mean(np.abs(measurements - projection) ** 2))
+        residual = xr.DataArray(residual, coords=[eigenvectors.temporal_angle]).expand_dims(
+            spatial_angle=eigenvectors.spatial_angle)
+        residuals.append(residual)
+    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
+    return residuals
 
 def save_complex(dataset, *args, **kwargs):
     ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
@@ -35,7 +60,9 @@ def save_complex(dataset, *args, **kwargs):
 
 def read_complex(*args, **kwargs):
     ds = xr.open_dataset(*args, **kwargs)
-    return ds.isel(reim=0) + 1j * ds.isel(reim=1)
+    output = ds.isel(reim=0) + 1j * ds.isel(reim=1)
+    output.attrs.update(ds.attrs)
+    return output
 
 def orthogonal_projection_residual(measurements, eigenvectors, degree, return_projection=False):
     """
@@ -60,7 +87,6 @@ def krylov_residual(solver, measurements, degree, n_jobs=4, std_scaling=False):
     error = krylov_error_fn(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
     loss = (error**2).mean()
     return np.array(loss)
-
 
 def least_squares_projection(y, A):
     y_array = np.array(y).ravel()
@@ -268,8 +294,12 @@ class noisy_methods(object):
         self._obj = data_array
 
     def get_projection_matrix(self):
-        dims = ('t', 'x', 'y', 'deg')
         modes = self._obj
+        if modes.dtype == complex:
+            dims = ('index', 'deg')
+        else:
+            dims = ('t', 'x', 'y', 'deg')
+
         potential_squeeze_dims = list(modes.dims)
         potential_squeeze_dims.remove('deg')
         squeeze_dims = []

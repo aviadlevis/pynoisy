@@ -492,6 +492,11 @@ class HGRFSolver(Solver):
         gradient = xr.DataArray(data=output.sum('t').data.T, coords=self.params.coords) / scaling
         return gradient
 
+    def std_scaling_factor(self, nrecur=1):
+        factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
+        return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
+                       self.diffusion.correlation_length ** 2).clip(min=1e-10)
+
     @classmethod
     def homogeneous(cls, **kwargs):
         """
@@ -519,10 +524,23 @@ class HGRFSolver(Solver):
         solver.params.attrs.update(kwargs)
         return solver
 
-    def std_scaling_factor(self, nrecur=1):
-        factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
-        return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
-                       self.diffusion.correlation_length ** 2).clip(min=1e-10)
+    @classmethod
+    def flat_variability(cls, nx, ny, temporal_angle, spatial_angle, advection_magnitude=0.2, seed=None):
+        """
+        Generate a flat variability solver.
+        temporal_angle: float, default=0.0
+            This angle defines the opening angle respect to the local azimuthal angle.
+            opening angle=0.0 is strictly rotational movement
+        spatial_angle: float, default= np.pi/2 - np.pi/9
+            This angle defines the opening angle of spirals with respect to the local radius
+        advection_magnitude: float
+            Magnitude of flattened advection
+        """
+        advection = pynoisy.advection.general_xy(nx, ny, opening_angle=temporal_angle, flat_magnitude=advection_magnitude)
+        diffusion = pynoisy.diffusion.general_xy(nx, ny, opening_angle=spatial_angle, flat_variability=True)
+        solver = cls(nx, ny, advection, diffusion, seed=seed)
+        return solver
+
 
 
 
