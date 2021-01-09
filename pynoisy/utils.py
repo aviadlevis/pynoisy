@@ -53,6 +53,25 @@ def compute_residual(files, measurements, degree):
     residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
     return residuals
 
+def find_closest_modes(spatial_angle, temporal_angle, files):
+    if isinstance(spatial_angle, str) and (spatial_angle != 'all'):
+        raise AttributeError('Invalid attribute, spatial angle should be a float or "all"')
+    if spatial_angle != 'all':
+        spatial_angles = np.linspace(-np.pi/2, np.pi/2, len(files))
+        idx = np.argmin(np.abs(spatial_angles-spatial_angle))
+        files = [files[np.argmax([file.endswith('{:03}.nc'.format(idx)) for file in files])]]
+
+    modes = []
+    for file in tqdm(files):
+        mode = xr.load_dataset(file)
+        if isinstance(temporal_angle, str) and (temporal_angle != 'all'):
+            raise AttributeError('Invalid attribute, temporal angle should be a float or "all"')
+        if temporal_angle != 'all':
+            mode = mode.sel(temporal_angle=temporal_angle, method='nearest')
+        modes.append(mode)
+    modes = xr.concat(modes, dim='spatial_angle').sortby('spatial_angle').squeeze()
+    return modes
+
 def save_complex(dataset, *args, **kwargs):
     ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
     ds = xr.concat([ds.real, ds.imag], dim='reim')

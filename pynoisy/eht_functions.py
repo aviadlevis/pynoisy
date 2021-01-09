@@ -37,8 +37,7 @@ def xarray_to_hdf5(movie, obs, fov, flipy=True):
         frame = movie.isel(t=i)
         image = eh.image.make_empty(frame.sizes['x'], fov * ehc.RADPERUAS, ra, dec, rf, mjd=mjd, source=obs.source)
         image.time = time
-        ivec = np.flipud(frame).ravel() if flipy else frame.data.ravel()
-        image.ivec = ivec
+        image.ivec = np.flipud(frame).ravel() if flipy else frame.data.ravel()
         im_list.append(image)
 
     return eh.movie.merge_im_list(im_list)

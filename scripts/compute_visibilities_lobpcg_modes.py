@@ -30,6 +30,10 @@ def parse_arguments():
     parser.add_argument('--startswith',
                         default='modes',
                         help='(default value: %(default)s) Modes file names start with this string.')
+    parser.add_argument('--flipy',
+                        default=False,
+                        action='store_true',
+                        help='(default value: %(default)s) Flip Y (up/down) axis between grf and ehtim movie.')
     args = parser.parse_args()
     return args
 
@@ -44,8 +48,6 @@ else:
 # fov = 250.0
 array_path = '/home/aviad/Code/eht-imaging/arrays/EHT{}.txt'.format(args.array_year)
 obs = ehtf.load_obs(array_path, uvfits_path)
-
-directory = './opening_angle_modes_12-05-2020/'
 files = [file for file in glob.glob(os.path.join(args.directory, '*.nc')) if file.split('/')[-1].startswith(args.startswith)]
 
 for file in tqdm(files, desc='file'):
@@ -55,7 +57,7 @@ for file in tqdm(files, desc='file'):
     for angle in tqdm(eigenvectors.temporal_angle, desc='angle', leave=False):
         modes_deg = []
         for deg in eigenvectors.deg:
-            movie = ehtf.xarray_to_hdf5(eigenvectors.sel(deg=deg, temporal_angle=angle), obs, args.fov, flipy=True)
+            movie = ehtf.xarray_to_hdf5(eigenvectors.sel(deg=deg, temporal_angle=angle), obs, args.fov, flipy=args.flipy)
             obs_data = movie.observe_same_nonoise(obs)
             data = xr.Dataset(data_vars={'vis': ('index', obs_data.data['vis']),
                                          'sigma': ('index', obs_data.data['sigma'])})
@@ -71,7 +73,8 @@ for file in tqdm(files, desc='file'):
         'modes_ny': modes.y.size,
         'fov': args.fov,
         'array_path': array_path,
-        'uvfits_path': uvfits_path
+        'uvfits_path': uvfits_path,
+        'flipy': str(args.flipy)
     })
-    pynoisy.utils.save_complex(visibility_modes, path=file.replace('modes.', 'vismodes.fov{}.{}array.{}'.format(
-        args.fov, args.array_year, args.target)))
+    pynoisy.utils.save_complex(visibility_modes, path=file.replace('modes.', 'vismodes.fov{}.{}array.{}.flipy{}'.format(
+        args.fov, args.array_year, args.target, str(args.flipy))))
