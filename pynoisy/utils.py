@@ -8,7 +8,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
 import h5py
 import os
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
@@ -29,7 +29,7 @@ def visualization_2d(residuals, ax=None, degree=None, contours=False):
     ax.set_ylabel('Spatial angle [rad]', fontsize=12)
     ax.legend(facecolor='white', framealpha=0.4)
 
-def compute_residual(files, measurements, degree):
+def compute_residual(files, measurements, degree=np.inf):
     if measurements.dtype == complex:
         load_modes = read_complex
     else:

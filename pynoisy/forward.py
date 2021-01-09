@@ -6,7 +6,7 @@ import numpy as np
 import noisy_core
 import pynoisy.utils as utils
 from joblib import Parallel, delayed
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import warnings
 import subprocess
 import os, tempfile, time
