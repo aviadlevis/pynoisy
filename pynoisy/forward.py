@@ -333,8 +333,8 @@ class HGRFSolver(Solver):
         subprocess.run(cmd)
 
         pixels = xr.load_dataset(self._output_file.name, group='data')
-        coords = {'t': np.linspace(0, evolution_length, num_frames), 'y': self.params.y, 'x': self.params.x}
-        dims = ['t', 'y', 'x']
+        coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
+        dims = ['t', 'x', 'y']
         attrs = {'seed': seed, 't units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
 
         if (solver_id == 4) or (solver_id == 5):
@@ -380,7 +380,7 @@ class HGRFSolver(Solver):
         return self.run(solver_id=2, evolution_length=movie.t.max().data, source=movie, verbose=verbose, timer=timer, std_scaling=std_scaling)
 
     def get_eigenvectors(self, num_frames=None, evolution_length=100.0, movie=None, eigenvector_init=None, blocksize=1, n_jobs=1, gevb=False,
-                         constraints=None, maxiter=100, precond=False, verbose=0, timer=False, std_scaling=False, tol=1.0, nprocx=1, nprocy=1, nproct=-1):
+                         constraints=None, maxiter=1000, precond=False, verbose=0, timer=False, std_scaling=False, tol=1.0, nprocx=1, nprocy=1, nproct=-1):
         solver_id = 5 if precond else 4
         mode, constrained, vinit = 'w', False, 0
 
@@ -525,7 +525,7 @@ class HGRFSolver(Solver):
         return solver
 
     @classmethod
-    def flat_variability(cls, nx, ny, temporal_angle, spatial_angle, advection_magnitude=0.2, seed=None):
+    def flat_variability(cls, nx, ny, temporal_angle=0.0, spatial_angle=np.pi/2 - np.pi/9, advection_magnitude=0.2, seed=None):
         """
         Generate a flat variability solver.
         temporal_angle: float, default=0.0

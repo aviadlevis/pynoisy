@@ -7,8 +7,10 @@ from ipywidgets import interact, fixed, interactive
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
 import h5py
-import os
+import os, sys
 from tqdm.auto import tqdm
+import gc
+
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
@@ -29,27 +31,28 @@ def visualization_2d(residuals, ax=None, degree=None, contours=False):
     ax.set_ylabel('Spatial angle [rad]', fontsize=12)
     ax.legend(facecolor='white', framealpha=0.4)
 
-def compute_residual(files, measurements, degree=np.inf):
+def compute_residual(files, measurements, degree=np.inf, envelope=None):
     if measurements.dtype == complex:
         load_modes = read_complex
     else:
-        load_modes = xr.load_dataset
+        load_modes = xr.load_dataarray
 
     residuals = []
     for file in tqdm(files, leave=False):
         residual = []
         modes = load_modes(file)
         degree = min(degree, modes.deg.size)
+        modes = modes.where(np.isfinite(measurements))
+        eigenvectors = modes.vis if (measurements.dtype == complex) else modes
+        eigenvectors = envelope * eigenvectors if envelope is not None else eigenvectors
         for temporal_angle in modes.temporal_angle:
-            eigenvectors = modes.vis if (measurements.dtype == complex) else modes.eigenvectors
-            projection_matrix = eigenvectors.sel(
-                temporal_angle=temporal_angle,
-                deg=slice(degree)).noisy_methods.get_projection_matrix()
-            projection = least_squares_projection(measurements, projection_matrix)
-            residual.append(np.mean(np.abs(measurements - projection) ** 2))
-        residual = xr.DataArray(residual, coords=[eigenvectors.temporal_angle]).expand_dims(
+            residual.append(projection_residual(measurements, eigenvectors.sel(temporal_angle=temporal_angle), degree))
+
+        residual = xr.DataArray(data=residual, coords=[eigenvectors.temporal_angle]).expand_dims(
             spatial_angle=eigenvectors.spatial_angle)
         residuals.append(residual)
+        del modes
+        gc.collect()
     residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
     return residuals
 
@@ -82,6 +85,21 @@ def read_complex(*args, **kwargs):
     output = ds.isel(reim=0) + 1j * ds.isel(reim=1)
     output.attrs.update(ds.attrs)
     return output
+
+def projection_residual(measurements, eigenvectors, degree, return_projection=False):
+    """
+    Compute projection residual of the measurements
+    """
+    projection_matrix = eigenvectors.sel(deg=slice(degree)).noisy_methods.get_projection_matrix()
+    projection = least_squares_projection(measurements, projection_matrix)
+    residual = np.mean(np.abs(measurements - projection) ** 2)
+
+    if return_projection:
+        projection.name = 'projection'
+        projection = projection.expand_dims(deg=[degree])
+        residual = xr.merge([residual, projection])
+
+    return residual
 
 def orthogonal_projection_residual(measurements, eigenvectors, degree, return_projection=False):
     """
@@ -217,7 +235,6 @@ def compare_movie_frames(frames1, frames2, scale='amp'):
         frames1=fixed(frames1), frames2=fixed(frames2), axes=fixed(axes), cbars=fixed(cbars)
     );
 
-
 def get_krylov_matrix(b, forward_fn, degree):
     """
     Compute a matrix with column vectors spanning the Krylov subspace of a certain degree.
@@ -243,7 +260,6 @@ def get_krylov_matrix(b, forward_fn, degree):
         k_matrix.append(np.array(b).ravel())
     return np.array(k_matrix)
 
-
 def load_grmhd(filepath):
     """
     Load an .h5 GRMHD movie frames
@@ -268,7 +284,6 @@ def load_grmhd(filepath):
                                 dims=['t', 'x', 'y'],
                                 attrs={'GRMHD': filename})
     return measurements
-
 
 def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, output=None, cmaps='viridis'):
     """TODO"""
@@ -311,6 +326,28 @@ def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, outp
 class noisy_methods(object):
     def __init__(self, data_array):
         self._obj = data_array
+
+    def to_world_coords(self, tstart, tstop, fov=160.0, xy_units='uas'):
+
+        import ehtim.const_def as ehc
+
+        movies = self._obj
+        movies = movies.assign_coords(
+            t=np.linspace(tstart, tstop, movies.t.size),
+            x=np.linspace(-fov / 2.0, fov / 2.0, movies.x.size),
+            y=np.linspace(-fov / 2.0, fov / 2.0, movies.y.size)
+        )
+        movies = movies.assign_coords()
+        psize = (fov * ehc.RADPERUAS) / movies.x.size
+
+        movies.attrs.update(
+            tstart=tstart,
+            tstop=tstop,
+            fov=fov,
+            psize=psize,
+            xy_units=xy_units,
+        )
+        return movies
 
     def get_projection_matrix(self):
         modes = self._obj

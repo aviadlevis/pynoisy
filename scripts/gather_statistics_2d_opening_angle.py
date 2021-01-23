@@ -5,6 +5,7 @@ import argparse
 from tqdm import tqdm
 import os, glob
 
+
 def parse_arguments():
     """Parse the command-line arguments for each run.
 
@@ -39,7 +40,6 @@ def parse_arguments():
     return args
 
 
-
 # Parse input arguments
 args = parse_arguments()
 
@@ -48,13 +48,15 @@ startswith = args.startswith
 
 files = [file for file in glob.glob(os.path.join(directory, '*.nc')) if file.split('/')[-1].startswith(startswith)]
 
-if (startswith == 'vismodes'):
+if (startswith.startswith('vismodes')):
     from pynoisy import eht_functions as ehtf
     modes = pynoisy.utils.read_complex(files[0])
     obs = ehtf.load_obs(modes.array_path, modes.uvfits_path)
     nt, nx, ny, fov = modes.modes_nt, modes.modes_nx, modes.modes_ny, modes.fov
-elif (startswith == 'modes'):
-    modes = xr.load_dataset(files[0])
+    flipy = True if modes.flipy=='True' else False
+
+elif (startswith == 'modes') or (startswith == 'flatmodes'):
+    modes = xr.load_dataarray(files[0])
     nt, nx, ny =  modes.t.size, modes.x.size, modes.y.size
 
 seed = args.seed
@@ -67,13 +69,19 @@ residual_stats = []
 for spatial_angle in tqdm(true_spatial_angle, desc='true spatial angle'):
     residuals = []
     for temporal_angle in tqdm(true_temporal_angle, desc='true temporal angle'):
-        solver = pynoisy.forward.HGRFSolver.flat_variability(
-            nx, ny, temporal_angle, spatial_angle, seed=args.seed
-        )
+        if (startswith == 'modes') or (startswith.startswith('vismodes.modes')):
+            advection = pynoisy.advection.general_xy(nx, ny, opening_angle=temporal_angle)
+            diffusion = pynoisy.diffusion.general_xy(nx, ny, opening_angle=spatial_angle)
+            solver = pynoisy.forward.HGRFSolver(nx, ny, advection, diffusion, seed=args.seed)
+        elif (startswith == 'flatmodes') or (startswith.startswith('vismodes.flatmodes')):
+            solver = pynoisy.forward.HGRFSolver.flat_variability(
+                nx, ny, temporal_angle, spatial_angle,
+                advection_magnitude=modes.advection_magnitude, seed=args.seed
+            )
         measurements = solver.run(num_frames=nt, n_jobs=args.n_jobs, verbose=False)
 
-        if (startswith=='vismodes'):
-            movie = ehtf.xarray_to_hdf5(measurements, obs, fov=fov, flipy=False)
+        if (startswith.startswith('vismodes')):
+            movie = ehtf.xarray_to_hdf5(measurements, obs, fov=fov, flipy=flipy)
             meas_obs = movie.observe_same_nonoise(obs)
             measurements = meas_obs.data['vis']
 

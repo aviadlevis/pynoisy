@@ -1,16 +1,136 @@
 import ehtim as eh
 import ehtim.const_def as ehc
 import numpy as np
-import os
+import xarray as xr
 from scipy.ndimage import median_filter
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import pynoisy
+import scipy.ndimage as nd
+import ehtim.observing.obs_helpers as obsh
+
+def compute_block_visibilities(movies, obs, fft_pad_factor=2):
+    """
+    Modification of ehtim's observe_same_nonoise method.
 
 
-def xarray_to_hdf5(movie, obs, fov, flipy=True):
+    Args:
+        movies (xr.DataArray): a 3D/4D dataarray with a single or multiple movies
+        obs (Obsdata): ehtim observation data containing the array geometry and measurement times.
+        fft_pad_factor (float):  a padding factor for increased fft resolution.
+
+    Returns:
+        block_vis(xr.DataArray): a data array of shape (num_movies, num_visibilities) and dtype np.complex128.
+
+    Notes:
+        1. NFFT is not supported.
+        2. Cubic interpolation in both time and uv (ehtim has linear interpolation in time and cubic in uv).
+    Refs:
+        https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/movie.py#L981
+        https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/observing/obs_simulate.py#L182
+        https://numpy.org/doc/stable/reference/generated/numpy.fft.fft2.html
+    """
+    movies = movies.squeeze()
+    obslist = obs.tlist()
+    u = np.concatenate([obsdata['u'] for obsdata in obslist])
+    v = np.concatenate([obsdata['v'] for obsdata in obslist])
+    uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
+    obstimes = [obsdata[0]['time'] for obsdata in obslist]
+    t = np.repeat(obstimes, uv_per_t)
+
+    # Pad images according to pad factor (interpolation in Fourier space)
+    npad = fft_pad_factor * np.max((movies.x.size, movies.y.size))
+    npad = obsh.power_of_two(npad)
+    padvalx1 = padvalx2 = int(np.floor((npad - movies.x.size) / 2.0))
+    if movies.x.size % 2:
+        padvalx2 += 1
+    padvaly1 = padvaly2 = int(np.floor((npad - movies.y.size) / 2.0))
+    if movies.y.size % 2:
+        padvaly2 += 1
+    padded_movies = movies.pad({'x': (padvalx1, padvalx2), 'y': (padvaly1, padvaly2)}, constant_values=0.0)
+
+    # Compute visibilities (Fourier transform) of the entire block
+    freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies.x.size, d=movies.psize))
+    block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
+    block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
+    block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
+
+    # Extra phase to match centroid convention
+    phase = np.exp(-1j * np.pi * movies.psize * ((1 + movies.x.size % 2) * u + (1 + movies.y.size % 2) * v))
+
+    # Pulse function
+    pulsefac = trianglePulse_F(2 * np.pi * u, movies.psize) * trianglePulse_F(2 * np.pi * v, movies.psize)
+
+    block_fourier = block_fourier.assign_coords(
+        t2=('t', range(block_fourier.t.size)),
+        u2=('u', range(block_fourier.u.size)),
+        v2=('v', range(block_fourier.v.size))
+    )
+    tuv2 = np.vstack((block_fourier.t2.interp(t=t),
+                      block_fourier.v2.interp(v=v),
+                      block_fourier.u2.interp(u=u)))
+
+    if block_fourier.ndim == 3:
+        visre = nd.map_coordinates(np.ascontiguousarray(np.real(block_fourier).data), tuv2)
+        visim = nd.map_coordinates(np.ascontiguousarray(np.imag(block_fourier).data), tuv2)
+        vis = visre + 1j * visim
+        block_vis = xr.DataArray(vis * phase * pulsefac, dims='index')
+
+    elif block_fourier.ndim == 4:
+        # Sample block Fourier on tuv coordinates of the observations
+        # Note: using np.ascontiguousarray seems to preform ~twice as fast
+        num_block = block_fourier.shape[0]
+        num_vis = len(t)
+        block_vis = np.empty(shape=(num_block, num_vis), dtype=np.complex128)
+        for i, fourier in enumerate(block_fourier):
+            visre = nd.map_coordinates(np.ascontiguousarray(np.real(fourier).data), tuv2)
+            visim = nd.map_coordinates(np.ascontiguousarray(np.imag(fourier).data), tuv2)
+            vis = visre + 1j * visim
+            block_vis[i] = vis * phase * pulsefac
+
+        block_vis = xr.DataArray(block_vis, dims=[movies.dims[0], 'index'],
+                                 coords={movies.dims[0]: movies.coords[movies.dims[0]],
+                                         'index': range(num_vis)}, attrs=movies.attrs)
+    else:
+        raise ValueError("unsupported number of dimensions: {}".format(block_fourier.ndim))
+
+    block_vis.attrs.update(source=obs.source)
+    return block_vis
+
+def trianglePulse_F(omega, pdim):
+    """
+    Modification of ehtim's trianglePulse_F to accept array of points
+
+    Args:
+        omega (np.array):array of frequencies
+        pdim (float):  pixel size in radians
+
+    Refs:
+        https://github.com/achael/eht-imaging/blob/50e728c02ef81d1d9f23f8c99b424705e0077431/ehtim/observing/pulses.py#L91
+    """
+    pulse = (4.0/(pdim**2 * omega**2)) * (np.sin((pdim * omega)/2.0))**2
+    pulse[omega==0] = 1.0
+    return pulse
+
+def hdf5_to_xarray(movie):
+    frame0 = movie.get_frame(0)
+    movie = xr.DataArray(
+        data=movie.iframes.reshape(movie.nframes, movie.xdim, movie.ydim),
+        coords={'t': movie.times,
+                'x': np.linspace(-frame0.fovx()/2, frame0.fovx()/2, frame0.xdim),
+                'y': np.linspace(-frame0.fovy()/2, frame0.fovy()/2, frame0.ydim)},
+        dims=['t', 'x', 'y'],
+        attrs={
+            'mjd': movie.mjd,
+            'ra': movie.ra,
+            'dec': movie.dec,
+            'rf': movie.rf
+        })
+    return movie
+
+def xarray_to_hdf5(movie, obs, fov, flipy=False):
     """Transform xarray to and HDF5 movie
 
     Args:
@@ -34,7 +154,7 @@ def xarray_to_hdf5(movie, obs, fov, flipy=True):
 
     im_list = []
     for i, time in enumerate(times):
-        frame = movie.isel(t=i)
+        frame = movie.isel(t=i).squeeze()
         image = eh.image.make_empty(frame.sizes['x'], fov * ehc.RADPERUAS, ra, dec, rf, mjd=mjd, source=obs.source)
         image.time = time
         image.ivec = np.flipud(frame).ravel() if flipy else frame.data.ravel()
@@ -223,7 +343,6 @@ def generate_observations(movie, obs_sgra, output_path='.', noise=True):
                              dterm_offset=dterm_offset, caltable_path=output_path, sigmat=0.25)
 
     return obs
-
 
 def load_fits(path):
     image = eh.image.load_fits(path)

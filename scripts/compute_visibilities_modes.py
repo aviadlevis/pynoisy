@@ -22,10 +22,10 @@ def parse_arguments():
                         help='(default value: %(default)s) Target (used for ra and dec): e.g. sgra or m87.')
     parser.add_argument('--fov',
                          type=float,
-                         default=140.0,
+                         default=160.0,
                          help='(default value: %(default)s) Measurement field of view.')
     parser.add_argument('--directory',
-                        default='opening_angle_modes',
+                        default='opening_angles_modes_subspace_iteration',
                         help='(default value: %(default)s) Path to input / output directory.')
     parser.add_argument('--startswith',
                         default='modes',
@@ -45,24 +45,22 @@ if args.target == 'sgra':
 else:
     raise AttributeError('target: {} not implemented'.format_map(args.target))
 
-# fov = 250.0
 array_path = '/home/aviad/Code/eht-imaging/arrays/EHT{}.txt'.format(args.array_year)
 obs = ehtf.load_obs(array_path, uvfits_path)
 files = [file for file in glob.glob(os.path.join(args.directory, '*.nc')) if file.split('/')[-1].startswith(args.startswith)]
 
 for file in tqdm(files, desc='file'):
-    modes = xr.load_dataset(file)
-    eigenvectors = modes.eigenvectors
+    modes = xr.load_dataarray(file)
     modes_angle = []
-    for angle in tqdm(eigenvectors.temporal_angle, desc='angle', leave=False):
+    for angle in tqdm(modes.temporal_angle, desc='angle', leave=False):
         modes_deg = []
-        for deg in eigenvectors.deg:
-            movie = ehtf.xarray_to_hdf5(eigenvectors.sel(deg=deg, temporal_angle=angle), obs, args.fov, flipy=args.flipy)
+        for deg in modes.deg:
+            movie = ehtf.xarray_to_hdf5(modes.sel(deg=deg, temporal_angle=angle), obs, args.fov, flipy=args.flipy)
             obs_data = movie.observe_same_nonoise(obs)
             data = xr.Dataset(data_vars={'vis': ('index', obs_data.data['vis']),
                                          'sigma': ('index', obs_data.data['sigma'])})
             data = data.expand_dims({'deg': [deg], 'temporal_angle': [angle],
-                                     'spatial_angle': eigenvectors.spatial_angle})
+                                     'spatial_angle': modes.spatial_angle})
             modes_deg.append(data)
         modes_angle.append(xr.concat(modes_deg, dim='deg'))
     visibility_modes = xr.concat(modes_angle, dim='temporal_angle')
@@ -76,5 +74,5 @@ for file in tqdm(files, desc='file'):
         'uvfits_path': uvfits_path,
         'flipy': str(args.flipy)
     })
-    pynoisy.utils.save_complex(visibility_modes, path=file.replace('modes.', 'vismodes.fov{}.{}array.{}.flipy{}'.format(
-        args.fov, args.array_year, args.target, str(args.flipy))))
+    pynoisy.utils.save_complex(visibility_modes, path=file.replace('modes.', 'vismodes.{}.fov{}.{}array.{}.flipy{}.'.format(
+        args.startswith, args.fov, args.array_year, args.target, str(args.flipy))))
