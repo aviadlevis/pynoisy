@@ -5,7 +5,6 @@ import argparse
 from tqdm import tqdm
 import os, glob
 
-
 def parse_arguments():
     """Parse the command-line arguments for each run.
 
@@ -13,9 +12,12 @@ def parse_arguments():
         args (Namespace): an argparse Namspace object with all the command line arguments.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('--directory',
+    parser.add_argument('--input_dir',
                         default='opening_angle_modes',
-                        help='(default value: %(default)s) Path to input / output directory.')
+                        help='(default value: %(default)s) Path to input directory.')
+    parser.add_argument('--output_dir',
+                        default='opening_angle_modes',
+                        help='(default value: %(default)s) Path to output directory.')
     parser.add_argument('--startswith',
                         default='modes',
                         help='(default value: %(default)s) Modes file names start with this string.')
@@ -35,28 +37,29 @@ def parse_arguments():
                          type=int,
                          default=5,
                          help='(default value: %(default)s) num_grid**2 number of true opening angle points.')
-
+    parser.add_argument('--damp',
+                        default=1.0,
+                        type=float,
+                        help='(default value: %(default)s) Amplitude of regularization (dampning).')
     args = parser.parse_args()
     return args
-
 
 # Parse input arguments
 args = parse_arguments()
 
-directory = args.directory
 startswith = args.startswith
 
-files = [file for file in glob.glob(os.path.join(directory, '*.nc')) if file.split('/')[-1].startswith(startswith)]
+files = [file for file in glob.glob(os.path.join(args.input_dir, '*.nc')) if file.split('/')[-1].startswith(startswith)]
 
 if (startswith.startswith('vismodes')):
     from pynoisy import eht_functions as ehtf
-    modes = pynoisy.utils.read_complex(files[0])
+    modes = pynoisy.utils.load_modes(files[0], dtype=complex)
     obs = ehtf.load_obs(modes.array_path, modes.uvfits_path)
     nt, nx, ny, fov = modes.modes_nt, modes.modes_nx, modes.modes_ny, modes.fov
     flipy = True if modes.flipy=='True' else False
 
 elif (startswith == 'modes') or (startswith == 'flatmodes'):
-    modes = xr.load_dataarray(files[0])
+    modes = pynoisy.utils.load_modes(files[0])
     nt, nx, ny =  modes.t.size, modes.x.size, modes.y.size
 
 seed = args.seed
@@ -73,11 +76,13 @@ for spatial_angle in tqdm(true_spatial_angle, desc='true spatial angle'):
             advection = pynoisy.advection.general_xy(nx, ny, opening_angle=temporal_angle)
             diffusion = pynoisy.diffusion.general_xy(nx, ny, opening_angle=spatial_angle)
             solver = pynoisy.forward.HGRFSolver(nx, ny, advection, diffusion, seed=args.seed)
+
         elif (startswith == 'flatmodes') or (startswith.startswith('vismodes.flatmodes')):
             solver = pynoisy.forward.HGRFSolver.flat_variability(
                 nx, ny, temporal_angle, spatial_angle,
                 advection_magnitude=modes.advection_magnitude, seed=args.seed
             )
+
         measurements = solver.run(num_frames=nt, n_jobs=args.n_jobs, verbose=False)
 
         if (startswith.startswith('vismodes')):
@@ -85,22 +90,18 @@ for spatial_angle in tqdm(true_spatial_angle, desc='true spatial angle'):
             meas_obs = movie.observe_same_nonoise(obs)
             measurements = meas_obs.data['vis']
 
-        output = pynoisy.utils.compute_residual(files, measurements, args.degree)
+        output = pynoisy.utils.opening_angles_grf_residuals(files, measurements, damp=args.damp, degree=args.degree)
         residuals.append(output.expand_dims({'true_temporal_angle': [temporal_angle],
                                              'true_spatial_angle': [spatial_angle]}))
     residual_stats.append(xr.concat(residuals, dim='true_temporal_angle'))
 residual_stats = xr.concat(residual_stats, dim='true_spatial_angle')
 
 # update attributes
-residual_stats.attrs = modes.attrs
-residual_stats.attrs.update(
-    file_num=len(files),
-    directory=directory,
-    measurement_seed=seed
-)
+residual_stats.attrs.update(modes.attrs)
+residual_stats.attrs.update(directory=args.input_dir)
 
 # Save output NetCDF
 residual_stats.to_netcdf(
-    os.path.join(directory, 'residuals.{}.stats.num_spatial{}.num_temporal{}.seed{}.degree{}.nc'.format(
-        startswith, residual_stats.true_spatial_angle.size, residual_stats.true_temporal_angle.size,
-        seed, int(residual_stats.deg))))
+    os.path.join(args.output_dir, 'residuals.damp{:1.2f}.{}.stats.num_spatial{}.num_temporal{}.seed{}.degree{}.nc'.format(
+        residual_stats.damp, startswith, residual_stats.true_spatial_angle.size,
+        residual_stats.true_temporal_angle.size, seed, int(residual_stats.deg))))

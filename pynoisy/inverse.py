@@ -9,7 +9,64 @@ import os
 import xarray as xr
 from matplotlib.colors import Normalize
 import pynoisy.utils
+from pylops import LinearOperator
+import pynoisy.eht_functions as ehtf
 
+class EHTOperator(LinearOperator):
+    """
+    TODO
+    """
+    def __init__(self, obs, coords, fft_pad_factor, grf=None, dtype='complex64'):
+        self.obs = obs
+        self.fft_pad_factor = fft_pad_factor
+        self.coords = coords
+        self.fov = coords['x'].max() - coords['x'].min()
+        if grf is None:
+            grf = xr.DataArray(
+                np.zeros((coords['t'].size, coords['x'].size, coords['x'].size)),
+                coords={'t': coords['t'], 'x': coords['x'], 'y': coords['x']},
+                dims=['t', 'x', 'y']
+            )
+        x = pynoisy.utils.sample_eht(grf, obs)
+        self.exp_grf = np.exp(grf).noisy_methods.to_world_coords(tstart=obs.tstart, tstop=obs.tstop, fov=self.fov)
+        self.psize = self.exp_grf.psize
+        self.shape = (x.size, coords['x'].size * coords['y'].size)
+        self.dtype = np.dtype(dtype)
+        self.explicit = False
+
+        dims = list(grf.dims)
+        dims.remove('x')
+        dims.remove('y')
+        self.sum_dims = dims
+
+    def set_grf(self, grf):
+        self.exp_grf = np.exp(grf)
+
+    def _vector_to_xarray(self, x):
+        return xr.DataArray(
+            x.reshape(self.coords['x'].size, self.coords['y'].size),
+            coords={'x': self.coords['x'], 'y': self.coords['y']})
+
+    def _xarray_to_vector(self, x):
+        x = x.data.ravel()
+        x = x[~np.isnan(x)]
+        return x
+
+    def _matvec(self, x):
+        movie = (self.exp_grf * self._vector_to_xarray(x)).noisy_methods.to_world_coords(
+            tstart=self.obs.tstart, tstop=self.obs.tstop, fov=self.fov)
+        output = ehtf.compute_block_visibilities(movie, psize=self.psize, fft_pad_factor=self.fft_pad_factor, obs=self.obs)
+        return np.array(output.data)
+
+    def _rmatvec(self, x):
+        x3d = np.zeros_like(self.measurements)
+        x3d[np.isfinite(self.measurements.data)] = x
+        x = xr.DataArray(x3d, coords=self.measurements.coords)
+        output = ehtf.compute_block_visibilities_adjoint(x, fov=self.measurements.fov,
+                                                         fft_pad_factor=self.fft_pad_factor)
+        output = self.exp_grf * output
+        output = self._xarray_to_vector(output.sum(self.sum_dims))
+        return output
 
 class SummaryWriter(tensorboardX.SummaryWriter):
     def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10, flush_secs=120,
@@ -357,7 +414,6 @@ def minimize_gradient_descent(fun, x0, method='GD', jac=True, bounds=None, optio
 
     return best_loss, best_x
 
-
 def spatial_angle_gradient(solver, dx=1e-5):
     """TODO"""
     def gradient(solver, forward, adjoint, mask, dx):
@@ -376,7 +432,6 @@ def spatial_angle_gradient(solver, dx=1e-5):
     gradient_fn = lambda forward, adjoint: gradient(solver, forward, adjoint, mask, dx)
     return gradient_fn
 
-
 def spatial_angle_set_state(solver, modulo=None):
     """TODO"""
     def set_state(solver, state, mask):
@@ -387,7 +442,6 @@ def spatial_angle_set_state(solver, modulo=None):
     else:
         set_state_fn = lambda state: set_state(solver, np.mod(state, modulo), mask)
     return set_state_fn
-
 
 def spatial_angle_get_state(solver):
     """TODO"""

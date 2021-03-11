@@ -7,6 +7,7 @@ import pynoisy.envelope
 import pynoisy.forward
 import pynoisy.inverse
 import pynoisy.utils
+import pynoisy.algebra_utils
 
 import os
 import pathlib

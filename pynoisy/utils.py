@@ -1,4 +1,6 @@
 import noisy_core
+import pynoisy.algebra_utils
+from pynoisy import eht_functions as ehtf
 import matplotlib.pyplot as plt
 import xarray as xr
 import numpy as np
@@ -7,12 +9,27 @@ from ipywidgets import interact, fixed, interactive
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import display
 import h5py
-import os, sys
+import os
 from tqdm.auto import tqdm
 import gc
 
-
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
+
+def load_modes(path, dtype=float):
+    if dtype == complex:
+        modes = read_complex(path)
+    elif dtype == float:
+        try:
+            modes = xr.load_dataarray(path)
+        except ValueError:
+            modes = xr.load_dataset(path)
+    elif dtype == 'eigenvalues':
+        modes = xr.open_dataset(path).eigenvalues
+    elif dtype == 'eigenvectors':
+        modes = xr.open_dataset(path).eigenvectors
+    else:
+        raise AttributeError('dtype is either float or complex')
+    return modes
 
 def visualization_2d(residuals, ax=None, degree=None, contours=False):
     if ax is None:
@@ -31,47 +48,155 @@ def visualization_2d(residuals, ax=None, degree=None, contours=False):
     ax.set_ylabel('Spatial angle [rad]', fontsize=12)
     ax.legend(facecolor='white', framealpha=0.4)
 
-def compute_residual(files, measurements, degree=np.inf, envelope=None):
-    if measurements.dtype == complex:
-        load_modes = read_complex
+def sample_eht(measurements, obs, conjugate=False, format='array'):
+    obslist = obs.tlist()
+    u = np.concatenate([obsdata['u'] for obsdata in obslist])
+    v = np.concatenate([obsdata['v'] for obsdata in obslist])
+    uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
+    obstimes = [obsdata[0]['time'] for obsdata in obslist]
+    t = np.repeat(obstimes, uv_per_t)
+
+    if conjugate:
+        t = np.concatenate((t, t))
+        u = np.concatenate((u, -u))
+        v = np.concatenate((v, -v))
+
+    if format == 'movie':
+        data = measurements.sel(
+            t=xr.DataArray(t, dims='index'),
+            u=xr.DataArray(v, dims='index'),
+            v=xr.DataArray(u, dims='index'), method='nearest'
+        )
+        eht_measurements = xr.full_like(measurements, fill_value=np.nan)
+        eht_measurements.attrs.update(measurements.attrs)
+        eht_measurements.attrs.update(source=obs.source)
+        eht_measurements.loc[{'t': data.t, 'u': data.u, 'v': data.v}] = data
+
+    elif format == 'array':
+        eht_measurements = measurements.interp(
+            t=xr.DataArray(t, dims='index'),
+            u=xr.DataArray(v, dims='index'),
+            v=xr.DataArray(u, dims='index')
+        )
     else:
-        load_modes = xr.load_dataarray
+        raise NotImplementedError('format {} not implemented'.format(format))
 
-    residuals = []
-    for file in tqdm(files, leave=False):
-        residual = []
-        modes = load_modes(file)
+    return eht_measurements
+
+def opening_angles_vis_residuals(files, measurements, envelope=None, damp=1.0, degree=np.inf, fft_pad_factor=1,
+                                 return_coefs=False):
+    fov = measurements.fov if 'fov' in measurements.attrs else 1.0
+    fft_pad_factor = measurements.fft_pad_factor if 'fft_pad_factor' in measurements.attrs else fft_pad_factor
+    if envelope is not None:
+        envelope_fourier = ehtf.compute_block_visibilities(envelope, measurements.psize, fft_pad_factor=fft_pad_factor)
+        envelope_eht = envelope_fourier.expand_dims(t=measurements.t).where(np.isfinite(measurements))
+        dynamic_measurements = measurements - envelope_eht
+        dynamic_measurements.attrs.update(measurements.attrs)
+        measurements = dynamic_measurements
+
+    residuals, coefficients = [], []
+    for file in tqdm(files):
+        modes = pynoisy.utils.load_modes(file, dtype=float).noisy_methods.to_world_coords(
+            tstart=float(measurements.t[0]), tstop=float(measurements.t[-1]), fov=fov)
+
+        residual, coefs = [], []
         degree = min(degree, modes.deg.size)
-        modes = modes.where(np.isfinite(measurements))
-        eigenvectors = modes.vis if (measurements.dtype == complex) else modes
-        eigenvectors = envelope * eigenvectors if envelope is not None else eigenvectors
-        for temporal_angle in modes.temporal_angle:
-            residual.append(projection_residual(measurements, eigenvectors.sel(temporal_angle=temporal_angle), degree))
+        for temporal_angle in tqdm(modes.temporal_angle, leave=False):
+            modes_reduced = modes.sel(temporal_angle=temporal_angle).isel(deg=slice(degree)).dropna('deg')
+            movies = modes_reduced.eigenvectors * envelope if envelope is not None else modes_reduced.eigenvectors
+            movies = movies * modes_reduced.eigenvalues
+            fourier = ehtf.compute_block_visibilities(movies=movies, psize=measurements.psize, fft_pad_factor=fft_pad_factor)
+            subspace = fourier.where(np.isfinite(measurements))
+            output = pynoisy.algebra_utils.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
 
-        residual = xr.DataArray(data=residual, coords=[eigenvectors.temporal_angle]).expand_dims(
-            spatial_angle=eigenvectors.spatial_angle)
+            if return_coefs:
+                res, coef = output
+                coefs.append(coef.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
+            else:
+                res = output
+            residual.append(res.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
+
+        residual = xr.concat(residual, dim='temporal_angle')
+        if return_coefs:
+            coefficients.append(xr.concat(coefs, dim='temporal_angle'))
         residuals.append(residual)
         del modes
         gc.collect()
-    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
-    return residuals
 
-def find_closest_modes(spatial_angle, temporal_angle, files):
+    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
+    residuals.attrs.update(measurements.attrs)
+    residuals.attrs.update(file_num=len(files),
+                           damp=damp,
+                           fov=fov,
+                           fft_pad_factor=fft_pad_factor,
+                           with_envelope='False' if envelope is None else 'True')
+    output = residuals
+    if return_coefs:
+        coefficients = xr.concat(coefficients, dim='spatial_angle').sortby('spatial_angle')
+        coefficients.attrs.update(residuals.attrs)
+        output = (residuals, coefficients)
+
+    return output
+
+def opening_angles_grf_residuals(files, measurements, envelope=None, damp=1.0, degree=np.inf, return_coefs=False):
+    residuals, coefficients = [], []
+    for file in tqdm(files):
+        modes = load_modes(file, dtype=measurements.dtype)
+
+        residual, coefs = [], []
+        degree = min(degree, modes.deg.size)
+        for temporal_angle in tqdm(modes.temporal_angle, leave=False):
+            modes_reduced = modes.sel(temporal_angle=temporal_angle).isel(deg=slice(degree)).dropna('deg')
+            subspace = envelope * modes_reduced.eigenvectors if envelope is not None else modes_reduced.eigenvectors
+            subspace *= modes_reduced.eigenvalues
+            subspace = subspace.where(np.isfinite(measurements))
+            output = pynoisy.algebra_utils.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
+            if return_coefs:
+                res, coef = output
+                coefs.append(coef.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
+            else:
+                res = output
+            residual.append(res.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
+
+        residual = xr.concat(residual, dim='temporal_angle')
+        if return_coefs:
+            coefficients.append(xr.concat(coefs, dim='temporal_angle'))
+        residuals.append(residual)
+        del modes
+        gc.collect()
+
+    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
+    residuals.attrs.update(file_num=len(files), damp=damp, with_envelope='False' if envelope is None else 'True')
+    residuals.attrs.update(measurements.attrs)
+    output = residuals
+    if return_coefs:
+        coefficients = xr.concat(coefficients, dim='spatial_angle').sortby('spatial_angle')
+        coefficients.attrs.update(residuals.attrs)
+        output = (residuals, coefficients)
+
+    return output
+
+def find_closest_modes(temporal_angle, spatial_angle, files, dtype=float):
     if isinstance(spatial_angle, str) and (spatial_angle != 'all'):
         raise AttributeError('Invalid attribute, spatial angle should be a float or "all"')
+    if isinstance(temporal_angle, str) and (temporal_angle != 'all'):
+        raise AttributeError('Invalid attribute, temporal angle should be a float or "all"')
+
+    spatial_angles = xr.concat(
+        [xr.open_dataset(file).spatial_angle for file in files], dim='spatial_angle').sortby('spatial_angle')
+
     if spatial_angle != 'all':
-        spatial_angles = np.linspace(-np.pi/2, np.pi/2, len(files))
-        idx = np.argmin(np.abs(spatial_angles-spatial_angle))
-        files = [files[np.argmax([file.endswith('{:03}.nc'.format(idx)) for file in files])]]
+        spatial_angle = spatial_angles.sel(spatial_angle=spatial_angle, method='nearest')
 
     modes = []
-    for file in tqdm(files):
-        mode = xr.load_dataset(file)
-        if isinstance(temporal_angle, str) and (temporal_angle != 'all'):
-            raise AttributeError('Invalid attribute, temporal angle should be a float or "all"')
+    for file in files:
+        if (spatial_angle != 'all') and (xr.open_dataset(file).spatial_angle != spatial_angle):
+            continue
+        mode = load_modes(file, dtype=dtype)
         if temporal_angle != 'all':
             mode = mode.sel(temporal_angle=temporal_angle, method='nearest')
         modes.append(mode)
+
     modes = xr.concat(modes, dim='spatial_angle').sortby('spatial_angle').squeeze()
     return modes
 
@@ -84,71 +209,20 @@ def read_complex(*args, **kwargs):
     ds = xr.open_dataset(*args, **kwargs)
     output = ds.isel(reim=0) + 1j * ds.isel(reim=1)
     output.attrs.update(ds.attrs)
+    output = output.to_array().squeeze('variable') if len(output.data_vars.items()) == 1 else output
     return output
 
-def projection_residual(measurements, eigenvectors, degree, return_projection=False):
-    """
-    Compute projection residual of the measurements
-    """
-    projection_matrix = eigenvectors.sel(deg=slice(degree)).noisy_methods.get_projection_matrix()
-    projection = least_squares_projection(measurements, projection_matrix)
-    residual = np.mean(np.abs(measurements - projection) ** 2)
-
-    if return_projection:
-        projection.name = 'projection'
-        projection = projection.expand_dims(deg=[degree])
-        residual = xr.merge([residual, projection])
-
-    return residual
-
-def orthogonal_projection_residual(measurements, eigenvectors, degree, return_projection=False):
-    """
-    Compute projection residual of the measurements
-    """
-    vectors_reduced = eigenvectors.sel(deg=range(degree))
-    coefficients = (measurements * vectors_reduced).sum(['t', 'x', 'y'])
-    projection = (coefficients * vectors_reduced).sum('deg')
-
-    residual = ((measurements - projection) ** 2).sum(['t', 'x', 'y'])
-    residual.name = 'projection_residual'
-    residual = residual.expand_dims(deg=[degree])
-
-    if return_projection:
-        projection.name = 'projection'
-        projection = projection.expand_dims(deg=[degree])
-        residual = xr.merge([residual, projection])
-
-    return residual
 
 def krylov_residual(solver, measurements, degree, n_jobs=4, std_scaling=False):
     error = krylov_error_fn(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
     loss = (error**2).mean()
     return np.array(loss)
 
-def least_squares_projection(y, A):
-    y_array = np.array(y).ravel()
-    y_mask = np.isfinite(y_array)
-    A_mask = np.isfinite(A)
-    assert np.equal(A_mask, y_mask[:, None]).all(), "Masks of A matrix and y are not identical"
-    projection = np.full_like(y_array, fill_value=np.nan)
-
-    A = A[A_mask].reshape(-1, A.shape[-1])
-    y_array = y_array[y_mask]
-    result = np.linalg.lstsq(A, y_array, rcond=-1)
-    coefs, residual = result[0], result[1]
-
-    projection[y_mask] = np.dot(A, coefs)
-    projection = projection.reshape(*y.shape)
-
-    if isinstance(y, xr.DataArray):
-        projection = xr.DataArray(projection, coords=y.coords)
-
-    return projection
 
 def krylov_projection(solver, measurements, degree, n_jobs=4, std_scaling=False):
     krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=std_scaling, n_jobs=n_jobs)
     k_matrix = krylov.data.reshape(degree, -1).T
-    projection = least_squares_projection(measurements, k_matrix)
+    projection = pynoisy.algebra_utils.least_squares_projection(measurements, k_matrix)
     return projection
 
 def krylov_error_fn(solver, measurements, degree, n_jobs=4, std_scaling=False):
@@ -285,7 +359,15 @@ def load_grmhd(filepath):
                                 attrs={'GRMHD': filename})
     return measurements
 
-def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, output=None, cmaps='viridis'):
+def grmhd_preprocessing(movie, flux_threshold=1e-10):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        measurements = np.log(movie.where(movie > flux_threshold))
+    measurements = measurements - measurements.mean('t')
+    return measurements
+
+def multiple_animations(movie_list, axes, vmin=None, vmax=None, titles=None, ticks=False, fps=10, output=None, cmaps='viridis'):
     """TODO"""
     # animation function.  This is called sequentially
     def animate(i):
@@ -295,14 +377,20 @@ def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, outp
 
     fig = plt.gcf()
     num_frames, nx, ny = movie_list[0].sizes.values()
-    extent = [movie_list[0].x.min(), movie_list[0].x.max(), movie_list[0].y.min(), movie_list[0].y.max()]
+
+    image_dims = list(movie_list[0].sizes.keys())
+    image_dims.remove('t')
+    extent = [movie_list[0][image_dims[0]].min(), movie_list[0][image_dims[0]].max(),
+              movie_list[0][image_dims[1]].min(), movie_list[0][image_dims[1]].max()]
 
     # initialization function: plot the background of each frame
     images = []
     titles = [movie.name for movie in movie_list] if titles is None else titles
     cmaps = [cmaps]*len(movie_list) if isinstance(cmaps, str) else cmaps
+    vmin = [movie.min() for movie in movie_list] if vmin is None else vmin
+    vmax = [movie.max() for movie in movie_list] if vmax is None else vmax
 
-    for movie, ax, title, cmap in zip(movie_list, axes, titles, cmaps):
+    for movie, ax, title, cmap, vmin, vmax in zip(movie_list, axes, titles, cmaps, vmin, vmax):
         if ticks == False:
             ax.set_xticks([])
             ax.set_yticks([])
@@ -311,7 +399,7 @@ def multiple_animations(movie_list, axes, titles=None, ticks=False, fps=10, outp
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.05)
         fig.colorbar(im, cax=cax)
-        im.set_clim(movie.min(), movie.max())
+        im.set_clim(vmin, vmax)
         images.append(im)
 
     plt.tight_layout()
@@ -332,38 +420,48 @@ class noisy_methods(object):
         import ehtim.const_def as ehc
 
         movies = self._obj
-        movies = movies.assign_coords(
-            t=np.linspace(tstart, tstop, movies.t.size),
-            x=np.linspace(-fov / 2.0, fov / 2.0, movies.x.size),
-            y=np.linspace(-fov / 2.0, fov / 2.0, movies.y.size)
-        )
-        movies = movies.assign_coords()
-        psize = (fov * ehc.RADPERUAS) / movies.x.size
+        x = np.linspace(-fov / 2.0, fov / 2.0, movies.x.size)
+        y = np.linspace(-fov / 2.0, fov / 2.0, movies.y.size)
+        xx, yy = np.meshgrid(x, y, indexing='ij')
+        movies = movies.assign_coords({'x': x, 'y': y,
+                                       'r': (['x', 'y'], np.sqrt(xx ** 2 + yy ** 2)),
+                                       'theta': (['x', 'y'], np.arctan2(yy, xx))})
 
+        psize = (fov * ehc.RADPERUAS) / movies.x.size
         movies.attrs.update(
-            tstart=tstart,
-            tstop=tstop,
             fov=fov,
             psize=psize,
-            xy_units=xy_units,
+            t_units = 'UTC hr',
+            xy_units=xy_units
         )
+
+        if 't' in movies.dims:
+            movies = movies.assign_coords(t=np.linspace(tstart, tstop, movies.t.size))
+            movies.attrs.update(tstart = tstart, tstop = tstop)
         return movies
 
-    def get_projection_matrix(self):
-        modes = self._obj
+    def get_projection_matrix(self, constant=1.0):
+        modes = self._obj.squeeze()
         if modes.dtype == complex:
-            dims = ('index', 'deg')
+            if modes.ndim == 2:
+                dims = ('index', 'deg')
+            elif modes.ndim == 4:
+                dims = ('t', 'u', 'v', 'deg')
+            else:
+                raise AttributeError('ndim = {} not supported for complex dtype'.format(modes.ndim))
         else:
             dims = ('t', 'x', 'y', 'deg')
 
         potential_squeeze_dims = list(modes.dims)
-        potential_squeeze_dims.remove('deg')
+        if 'deg' in potential_squeeze_dims:
+            potential_squeeze_dims.remove('deg')
         squeeze_dims = []
         for dim in potential_squeeze_dims:
             if modes.sizes[dim] == 1:
                 squeeze_dims.append(dim)
         modes = modes.squeeze(squeeze_dims)
         matrix = modes.transpose(*dims).data.reshape(-1, modes.deg.size)
+
         return matrix
 
     def get_tensor(self):
@@ -430,7 +528,11 @@ class noisy_methods(object):
             fig = plt.gcf()
 
         num_frames, nx, ny = self._obj.sizes.values()
-        extent = [self._obj.x.min(), self._obj.x.max(), self._obj.y.min(), self._obj.y.max()]
+        image_dims = list(self._obj.sizes.keys())
+        image_dims.remove('t')
+
+        extent = [self._obj[image_dims[0]].min(), self._obj[image_dims[0]].max(),
+                  self._obj[image_dims[1]].min(), self._obj[image_dims[1]].max()]
 
         # initialization function: plot the background of each frame
         im = ax.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)

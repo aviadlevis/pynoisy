@@ -13,7 +13,7 @@ import os, tempfile, time
 from scipy.special import gamma
 import pynoisy.advection
 import pynoisy.diffusion
-
+from os import getpid
 
 class Solver(object):
     """TODO"""
@@ -237,20 +237,19 @@ class HGRFSolver(Solver):
     solver_list = ['PCG', 'SMG']
     random_types = ['numpy', 'zigur']
 
-    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, solver_type='PCG', random_type='numpy', executable='matrices'):
+    def __init__(self, nx, ny, advection, diffusion, forcing_strength=1.0, seed=None, num_solvers=1, solver_type='PCG', random_type='numpy', executable='matrices'):
         super().__init__(nx, ny, advection, diffusion, forcing_strength, seed)
         assert solver_type in self.solver_list, 'Not supported solver type: {}'.format(solver_type)
         assert random_type in self.random_types, 'Not supported random type: {}'.format(random_type)
         self._solver_id = self.solver_list.index(solver_type)
         self._params.update({'solver_type': solver_type, 'random_type': random_type})
-        self._params.attrs = {'solver_type': 'HGRF', 'executable': executable}
+        self._params.attrs = {'solver_type': 'HGRF', 'executable': executable, 'num_solvers': num_solvers}
         self._param_file = tempfile.NamedTemporaryFile(suffix='.h5')
-        self._src_file = tempfile.NamedTemporaryFile(suffix='.h5')
-        self._output_file = tempfile.NamedTemporaryFile(suffix='.h5')
+        self._src_file = tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else [tempfile.NamedTemporaryFile(suffix='.h5') for i in range(num_solvers)]
+        self._output_file = tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else [tempfile.NamedTemporaryFile(suffix='.h5') for i in range(num_solvers)]
 
     def __del__(self):
         del self._param_file, self._src_file, self._output_file
-
 
     def parallel_processing_cmd(self, num_frames, n_jobs, nprocx, nprocy, nproct):
         """
@@ -286,11 +285,9 @@ class HGRFSolver(Solver):
         seed = self.seed if seed is None else seed
         solver_id = self._solver_id if solver_id is None else solver_id
 
-        # Either pre-determined source or randomly sampled from Gaussian distribution
-        output = os.path.dirname(self._output_file.name)
-        filename = os.path.relpath(self._output_file.name, output)
         self.save(self._param_file.name)
 
+        # Either pre-determined source or randomly sampled from Gaussian distribution
         assert ((num_frames is not None) or (source is not None)), \
             'If the source is unspecified, the number of frames should be specified.'
 
@@ -307,8 +304,8 @@ class HGRFSolver(Solver):
             evolution_length = source.t.max().data
 
         n_jobs, proccesing_cmd = self.parallel_processing_cmd(num_frames, n_jobs, nprocx, nprocy, nproct)
-        cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-seed', str(seed), '-output', output, '-tol', str(tol),
-               '-filename', filename, '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
+        cmd = ['mpiexec', '-n', str(n_jobs), self.params.executable, '-seed', str(seed),  '-tol', str(tol),
+               '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
                '-dump', '-params', self._param_file.name, '-solver', str(solver_id), '-tend', str(evolution_length)]
         cmd.extend(proccesing_cmd)
         if constrained:
@@ -327,49 +324,63 @@ class HGRFSolver(Solver):
             source = source * self.std_scaling_factor(nrecur)
 
         mode = 'a' if ((solver_id==3) or (constrained) or (vinit)) else 'w'
-        source.to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
-        cmd.extend(['-source', self._src_file.name])
 
-        subprocess.run(cmd)
+        if self.params.num_solvers == 1:
+            output_dir = os.path.dirname(self._output_file.name)
+            output_filename = os.path.relpath(self._output_file.name, output_dir)
+            cmd.extend(['-source', self._src_file.name, '-output', output_dir, '-filename', output_filename])
+            output = []
+            for sample in range(source.sample.size):
+                source.sel(sample=sample).to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode=mode)
+                subprocess.run(cmd)
+                output.append((sample, xr.load_dataset(self._output_file.name, group='data')))
 
-        pixels = xr.load_dataset(self._output_file.name, group='data')
-        coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
-        dims = ['t', 'x', 'y']
-        attrs = {'seed': seed, 't units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
+        elif self.params.num_solvers > 1:
 
-        if (solver_id == 4) or (solver_id == 5):
-            coords.update(deg=range(max(nrecur, vinit)))
-            output = xr.Dataset(
-                coords=coords,
-                data_vars={
-                    'eigenvectors': (['deg', 't', 'x', 'y'], [pixels['eigenvector_{}'.format(deg)].data for deg in coords['deg']]),
-                    'eigenvalues': ('deg', [pixels['eigenvalue_{}'.format(deg)] for deg in coords['deg']]),
-                    'residuals':  ('deg', [pixels['residual_{}'.format(deg)] for deg in coords['deg']])
-                },
-                attrs = {'min_residual': float(pixels['min_residual'])}
+            def parallel_solve(cmd, source, sample, input_names, output_names, n_jobs):
+                file_id = np.mod(getpid(), n_jobs)
+                output_dir = os.path.dirname(output_names[file_id])
+                output_filename = os.path.relpath(output_names[file_id], output_dir)
+                cmd.extend(['-source', input_names[file_id], '-output', output_dir, '-filename', output_filename])
+                source.to_dataset(name='data_raw').to_netcdf(input_names[file_id], group='data', mode=mode)
+                subprocess.run(cmd)
+                output = xr.load_dataset(output_names[file_id], group='data')
+                return (sample, output)
+
+            output = Parallel(n_jobs=self.params.num_solvers)(
+                delayed(parallel_solve)(
+                    cmd, source.isel(sample=sample), sample,
+                    input_names=[file.name for file in self._src_file],
+                    output_names=[file.name for file in self._output_file],
+                    n_jobs=self.params.num_solvers)
+                for sample in range(source.sample.size)
             )
 
+
+        coords = {'t': np.linspace(0, evolution_length, num_frames), 'x': self.params.x, 'y': self.params.y}
+        dims = ['t', 'x', 'y']
+        attrs = {'seed': seed, 't_units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
+
+        if (solver_id == 4) or (solver_id == 5):
+            raise AttributeError('Not supported')
+
         else:
-            movies = [
-                xr.DataArray(pixels['step_{}'.format(deg)].data, coords=coords, dims=dims, attrs=attrs).assign_coords(
-                    deg=deg + 1)
-                for deg in range(nrecur - 1)
-            ]
-            final_movie = xr.DataArray(data=pixels.data_raw.data, coords=coords, dims=dims, attrs=attrs)
-            final_movie = final_movie.assign_coords(deg=nrecur)
-            movies.append(final_movie)
-            output = xr.concat(movies, dim='deg')
-            output.name = 'krylov subspace'
+            for sample, pixels in output:
+                movies = [
+                    xr.DataArray(pixels['step_{}'.format(deg)].data, coords=coords, dims=dims, attrs=attrs).assign_coords(
+                        deg=deg + 1, sample=sample) for deg in range(nrecur - 1)
+                ]
+                final_movie = xr.DataArray(data=pixels.data_raw.data, coords=coords, dims=dims, attrs=attrs)
+                final_movie = final_movie.assign_coords(deg=nrecur, sample=sample)
+                movies.append(final_movie)
+                output[sample] = xr.concat(movies, dim='deg')
+            output = xr.concat(output, dim='sample')
 
-        if (nrecur == 1) and (solver_id < 3):
+        if (nrecur == 1):
             output = output.squeeze('deg').drop_vars('deg')
-            output.name = 'grf'
 
-        if (num_samples > 1):
-            raise NotImplementedError
-            # coords['sample'] = range(num_samples)
-            # dims = ['sample'] + dims
-            # coords['seed'] = ('sample', seed + np.arange(num_samples))
+        if (output.sample.size == 1):
+            output = output.squeeze('sample').drop_vars('sample')
 
         return output
 

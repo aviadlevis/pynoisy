@@ -141,3 +141,11 @@ def general_xy(nx, ny, scaling_radius=0.1):
     }
     envelope.attrs.update(new_attrs)
     return envelope
+
+def azimuth_symetric(coords, envelope_r):
+    """
+    TODO
+    """
+    envelope = envelope_r.interp(r=coords['r'])
+    envelope.attrs.update(envelope_model='azimuth_symetric')
+    return envelope

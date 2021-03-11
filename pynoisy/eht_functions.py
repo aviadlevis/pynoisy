@@ -11,14 +11,154 @@ import pynoisy
 import scipy.ndimage as nd
 import ehtim.observing.obs_helpers as obsh
 
-def compute_block_visibilities(movies, obs, fft_pad_factor=2):
+def array_to_obs(array, obs, tadv, tint, tstart=None, tstop=None):
+    """Generate synthetic obs from an array configuration
+
+    Args:
+        array (ehtim.Array): ehtim ehtim Array object.
+        obs: (ehtim.Obsdata): ehtim obsdata object.
+    Returns:
+        new_obs (Obsdata): observation object
+    """
+    new_obs = array.obsdata(
+        ra=obs.ra,
+        dec=obs.dec,
+        rf=obs.rf,
+        bw=obs.bw,
+        tint=tint,
+        tadv=tadv,
+        tstart=tstart if tstart is not None else obs.tstart,
+        tstop=tstop if tstop is not None else obs.tstop,
+        mjd=obs.mjd,
+        timetype=obs.timetype,
+        polrep=obs.polrep
+    )
+    new_obs.source = 'SYNTHETIC'
+    return new_obs
+
+def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=None, return_coords=False):
     """
     Modification of ehtim's observe_same_nonoise method.
 
 
     Args:
         movies (xr.DataArray): a 3D/4D dataarray with a single or multiple movies
+        psize (float): pixel size in [rad]
         obs (Obsdata): ehtim observation data containing the array geometry and measurement times.
+                      If obs=None this function returns the full Fourier transform.
+        fft_pad_factor (float):  a padding factor for increased fft resolution.
+        return_coords (bool): return the full fourier coordinates.
+    Returns:
+        block_vis(xr.DataArray): a data array of shape (num_movies, num_visibilities) and dtype np.complex128.
+
+    Notes:
+        1. NFFT is not supported.
+        2. Cubic interpolation in both time and uv (ehtim has linear interpolation in time and cubic in uv).
+    Refs:
+        https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/movie.py#L981
+        https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/observing/obs_simulate.py#L182
+        https://numpy.org/doc/stable/reference/generated/numpy.fft.fft2.html
+    """
+    movies = movies.squeeze()
+
+    # Pad images according to pad factor (interpolation in Fourier space)
+    npad = fft_pad_factor * np.max((movies.x.size, movies.y.size))
+    npad = obsh.power_of_two(npad)
+    padvalx1 = padvalx2 = int(np.floor((npad - movies.x.size) / 2.0))
+    if movies.x.size % 2:
+        padvalx2 += 1
+    padvaly1 = padvaly2 = int(np.floor((npad - movies.y.size) / 2.0))
+    if movies.y.size % 2:
+        padvaly2 += 1
+    padded_movies = movies.pad({'x': (padvalx1, padvalx2), 'y': (padvaly1, padvaly2)}, constant_values=0.0)
+
+    # Compute visibilities (Fourier transform) of the entire block
+    freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies.x.size, d=psize))
+    block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
+    block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
+    block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
+    fourier_coords = block_fourier.coords
+
+    if obs is None:
+        # Extra phase to match centroid convention
+        phase = np.exp(-1j * np.pi * psize * ((1 + movies.x.size % 2) * block_fourier.u +
+                                              (1 + movies.y.size % 2) * block_fourier.v))
+
+        # Pulse function
+        pulsefac = trianglePulse_F(2 * np.pi * block_fourier.u, psize) * \
+                   trianglePulse_F(2 * np.pi * block_fourier.v, psize)
+
+        block_vis = block_fourier * phase * pulsefac
+
+    else:
+        obslist = obs.tlist()
+        u = np.concatenate([obsdata['u'] for obsdata in obslist])
+        v = np.concatenate([obsdata['v'] for obsdata in obslist])
+        uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
+        obstimes = [obsdata[0]['time'] for obsdata in obslist]
+        t = np.repeat(obstimes, uv_per_t)
+
+        # Extra phase to match centroid convention
+        phase = np.exp(-1j * np.pi * psize * ((1 + movies.x.size % 2) * u + (1 + movies.y.size % 2) * v))
+
+        # Pulse function
+        pulsefac = trianglePulse_F(2 * np.pi * u, psize) * trianglePulse_F(2 * np.pi * v, psize)
+
+        # For static images duplicate temporal dimension
+        if 't' not in block_fourier.coords:
+            block_fourier = block_fourier.expand_dims(t=obstimes)
+
+        block_fourier = block_fourier.assign_coords(
+            t2=('t', range(block_fourier.t.size)),
+            u2=('u', range(block_fourier.u.size)),
+            v2=('v', range(block_fourier.v.size))
+        )
+        tuv2 = np.vstack((block_fourier.t2.interp(t=t),
+                          block_fourier.v2.interp(v=v),
+                          block_fourier.u2.interp(u=u)))
+
+        if block_fourier.ndim == 3:
+            visre = nd.map_coordinates(np.ascontiguousarray(np.real(block_fourier).data), tuv2)
+            visim = nd.map_coordinates(np.ascontiguousarray(np.imag(block_fourier).data), tuv2)
+            vis = visre + 1j * visim
+            block_vis = xr.DataArray(vis * phase * pulsefac, dims='index')
+
+        elif block_fourier.ndim == 4:
+            # Sample block Fourier on tuv coordinates of the observations
+            # Note: using np.ascontiguousarray seems to preform ~twice as fast
+            num_block = block_fourier.shape[0]
+            num_vis = len(t)
+            block_vis = np.empty(shape=(num_block, num_vis), dtype=np.complex128)
+            for i, fourier in enumerate(block_fourier):
+                visre = nd.map_coordinates(np.ascontiguousarray(np.real(fourier).data), tuv2)
+                visim = nd.map_coordinates(np.ascontiguousarray(np.imag(fourier).data), tuv2)
+                vis = visre + 1j * visim
+                block_vis[i] = vis * phase * pulsefac
+
+            block_vis = xr.DataArray(block_vis, dims=[movies.dims[0], 'index'],
+                                     coords={movies.dims[0]: movies.coords[movies.dims[0]],
+                                             'index': range(num_vis)})
+        else:
+            raise ValueError("unsupported number of dimensions: {}".format(block_fourier.ndim))
+
+        block_vis.attrs.update(source=obs.source)
+        block_vis = block_vis.assign_coords(t=('index', t), u=('index', v), v=('index', u))
+    block_vis.attrs.update(movies.attrs)
+    block_vis.attrs.update(psize=psize, fft_pad_factor=fft_pad_factor)
+    output = block_vis if return_coords is False else (block_vis, fourier_coords)
+    return output
+
+def compute_block_visibilities_adjoint(movies, fov=1, fft_pad_factor=2):
+    """
+    Modification of ehtim's observe_same_nonoise method.
+    This is the adjoint method used for optimziation.
+
+
+    Args:
+        movies (xr.DataArray): a 3D/4D dataarray with a single or multiple movies
+        psize (float): pixel size in [rad]
+        obs (Obsdata): ehtim observation data containing the array geometry and measurement times.
+                      If obs=None this function returns the full Fourier transform.
         fft_pad_factor (float):  a padding factor for increased fft resolution.
 
     Returns:
@@ -33,70 +173,38 @@ def compute_block_visibilities(movies, obs, fft_pad_factor=2):
         https://numpy.org/doc/stable/reference/generated/numpy.fft.fft2.html
     """
     movies = movies.squeeze()
-    obslist = obs.tlist()
-    u = np.concatenate([obsdata['u'] for obsdata in obslist])
-    v = np.concatenate([obsdata['v'] for obsdata in obslist])
-    uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
-    obstimes = [obsdata[0]['time'] for obsdata in obslist]
-    t = np.repeat(obstimes, uv_per_t)
 
     # Pad images according to pad factor (interpolation in Fourier space)
-    npad = fft_pad_factor * np.max((movies.x.size, movies.y.size))
+    npad = fft_pad_factor * np.max((movies.u.size, movies.v.size))
     npad = obsh.power_of_two(npad)
-    padvalx1 = padvalx2 = int(np.floor((npad - movies.x.size) / 2.0))
-    if movies.x.size % 2:
+    padvalx1 = padvalx2 = int(np.floor((npad - movies.u.size) / 2.0))
+    if movies.u.size % 2:
         padvalx2 += 1
-    padvaly1 = padvaly2 = int(np.floor((npad - movies.y.size) / 2.0))
-    if movies.y.size % 2:
+    padvaly1 = padvaly2 = int(np.floor((npad - movies.v.size) / 2.0))
+    if movies.v.size % 2:
         padvaly2 += 1
-    padded_movies = movies.pad({'x': (padvalx1, padvalx2), 'y': (padvaly1, padvaly2)}, constant_values=0.0)
+    padded_movies = movies.pad({'u': (padvalx1, padvalx2), 'v': (padvaly1, padvaly2)}, constant_values=0.0)
 
-    # Compute visibilities (Fourier transform) of the entire block
-    freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies.x.size, d=movies.psize))
-    block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
-    block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
-    block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
-
-    # Extra phase to match centroid convention
-    phase = np.exp(-1j * np.pi * movies.psize * ((1 + movies.x.size % 2) * u + (1 + movies.y.size % 2) * v))
+    # Remove extra phase from centroid convention
+    psize = (fov * ehc.RADPERUAS) / movies.u.size
+    phase = np.exp(-1j * np.pi * psize * ((1 + padded_movies.u.size % 2) * padded_movies.u +
+                                          (1 + padded_movies.v.size % 2) * padded_movies.v))
 
     # Pulse function
-    pulsefac = trianglePulse_F(2 * np.pi * u, movies.psize) * trianglePulse_F(2 * np.pi * v, movies.psize)
+    pulsefac = trianglePulse_F(2 * np.pi * padded_movies.u, psize) * \
+               trianglePulse_F(2 * np.pi * padded_movies.v, psize)
+    padded_movies = padded_movies * phase.conj() * pulsefac.conj()
 
-    block_fourier = block_fourier.assign_coords(
-        t2=('t', range(block_fourier.t.size)),
-        u2=('u', range(block_fourier.u.size)),
-        v2=('v', range(block_fourier.v.size))
-    )
-    tuv2 = np.vstack((block_fourier.t2.interp(t=t),
-                      block_fourier.v2.interp(v=v),
-                      block_fourier.u2.interp(u=u)))
+    # Compute visibilities (Fourier transform) of the entire block
+    freqs = np.linspace(-fov / 2.0, fov / 2.0, movies.u.size)
+    block_fourier = (padded_movies.u.size * padded_movies.v.size) * np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(padded_movies)))
+    block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
+    block_fourier = block_fourier.rename({'u': 'x', 'v': 'y'}).assign_coords(x=freqs, y=freqs)
 
-    if block_fourier.ndim == 3:
-        visre = nd.map_coordinates(np.ascontiguousarray(np.real(block_fourier).data), tuv2)
-        visim = nd.map_coordinates(np.ascontiguousarray(np.imag(block_fourier).data), tuv2)
-        vis = visre + 1j * visim
-        block_vis = xr.DataArray(vis * phase * pulsefac, dims='index')
+    block_vis = block_fourier
 
-    elif block_fourier.ndim == 4:
-        # Sample block Fourier on tuv coordinates of the observations
-        # Note: using np.ascontiguousarray seems to preform ~twice as fast
-        num_block = block_fourier.shape[0]
-        num_vis = len(t)
-        block_vis = np.empty(shape=(num_block, num_vis), dtype=np.complex128)
-        for i, fourier in enumerate(block_fourier):
-            visre = nd.map_coordinates(np.ascontiguousarray(np.real(fourier).data), tuv2)
-            visim = nd.map_coordinates(np.ascontiguousarray(np.imag(fourier).data), tuv2)
-            vis = visre + 1j * visim
-            block_vis[i] = vis * phase * pulsefac
-
-        block_vis = xr.DataArray(block_vis, dims=[movies.dims[0], 'index'],
-                                 coords={movies.dims[0]: movies.coords[movies.dims[0]],
-                                         'index': range(num_vis)}, attrs=movies.attrs)
-    else:
-        raise ValueError("unsupported number of dimensions: {}".format(block_fourier.ndim))
-
-    block_vis.attrs.update(source=obs.source)
+    block_vis.attrs.update(movies.attrs)
+    block_vis.attrs.update(psize=psize)
     return block_vis
 
 def trianglePulse_F(omega, pdim):
