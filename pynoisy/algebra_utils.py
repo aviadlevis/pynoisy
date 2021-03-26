@@ -73,7 +73,16 @@ def randomized_subspace_iteration(solver, input_vectors, orthogonal_subspace=Non
     modes = xr.merge([eigenvectors, eigenvalues])
     return modes
 
-def least_squares_projection(y, A, damp=0.0, return_projection=False, return_coefs=False):
+
+def real_lsqr(y, A, damp=0.0):
+    l2_loss = lambda x: np.linalg.norm(y - A.dot(x))**2 + np.linalg.norm(damp*x)**2
+    l2_grad = lambda x: 2*np.ascontiguousarray(np.real(A.conj().T.dot(A.dot(x) - y)) - (damp**2) * x)
+
+    out = scipy.optimize.minimize(l2_loss, jac=l2_grad, method='L-BFGS-B',
+                                  x0=np.zeros(A.shape[-1], dtype=np.float64))
+    return out['fun'], out['x']
+
+def least_squares_projection(y, A, damp=0.0, return_projection=False, return_coefs=False, real_estimation=True):
     y_array = np.array(y).ravel()
     meas_length = y.size
     y_mask = np.isfinite(y_array)
@@ -85,16 +94,23 @@ def least_squares_projection(y, A, damp=0.0, return_projection=False, return_coe
     if meas_length < A.shape[0]:
         y_array = np.concatenate((y_array, np.zeros(A.shape[0] - meas_length)))
         y_mask = np.concatenate((y_mask, np.ones(A.shape[0] - meas_length, dtype=np.bool)))
-        size_diff = meas_length-A.shape[0]
+        size_diff = meas_length - A.shape[0]
 
     assert np.equal(A_mask, y_mask[:, None]).all(), "Masks of A matrix and y are not identical"
 
     A = A[A_mask].reshape(-1, A.shape[-1])
     y_array = y_array[y_mask]
 
-    out = lsqr(A, y_array, damp=damp)
-    coefs, r1norm, r2norm = out[0], out[3], out[4]
-    output = (r1norm, r2norm)
+    if (real_estimation) and y.dtype == 'complex':
+        r2, coefs = real_lsqr(y, A, damp)
+        projection[y_mask[:meas_length]] = np.dot(A[:size_diff], coefs)
+        projection = projection.reshape(*y.shape)
+        r1 = np.linalg.norm(y - projection) ** 2
+    else:
+        out = lsqr(A, y_array, damp=damp)
+        coefs, r1, r2 = out[0], out[3]**2, out[4]**2
+
+    output = (r1, r2)
     if return_projection:
         projection[y_mask[:meas_length]] = np.dot(A[:size_diff], coefs)
         projection = projection.reshape(*y.shape)

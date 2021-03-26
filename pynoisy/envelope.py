@@ -20,7 +20,7 @@ def grid(data):
 
 
 def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
-         photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10):
+         photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, total_flux=2.0):
     """
     TODO
     """
@@ -57,6 +57,7 @@ def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05,
         data += zone3
 
     envelope = grid(data)
+    envelope *= (total_flux / envelope.sum())
     new_attrs = {
         'envelope_model': 'disk',
         'inner_radius': inner_radius,

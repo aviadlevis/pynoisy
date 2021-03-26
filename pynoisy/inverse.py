@@ -12,24 +12,24 @@ import pynoisy.utils
 from pylops import LinearOperator
 import pynoisy.eht_functions as ehtf
 
+
 class EHTOperator(LinearOperator):
     """
     TODO
     """
-    def __init__(self, obs, coords, fft_pad_factor, grf=None, dtype='complex64'):
-        self.obs = obs
+    def __init__(self, measurements, coords, fft_pad_factor, grf=None, dtype='complex64'):
+        x = self._xarray_to_vector(measurements)
+        self.measurements = measurements
         self.fft_pad_factor = fft_pad_factor
         self.coords = coords
-        self.fov = coords['x'].max() - coords['x'].min()
+
         if grf is None:
             grf = xr.DataArray(
-                np.zeros((coords['t'].size, coords['x'].size, coords['x'].size)),
-                coords={'t': coords['t'], 'x': coords['x'], 'y': coords['x']},
+                np.zeros((measurements['t'].size, coords['x'].size, coords['x'].size)),
+                coords={'t': measurements['t'], 'x': coords['x'], 'y': coords['x']},
                 dims=['t', 'x', 'y']
             )
-        x = pynoisy.utils.sample_eht(grf, obs)
-        self.exp_grf = np.exp(grf).noisy_methods.to_world_coords(tstart=obs.tstart, tstop=obs.tstop, fov=self.fov)
-        self.psize = self.exp_grf.psize
+        self.exp_grf = np.exp(grf)
         self.shape = (x.size, coords['x'].size * coords['y'].size)
         self.dtype = np.dtype(dtype)
         self.explicit = False
@@ -43,9 +43,7 @@ class EHTOperator(LinearOperator):
         self.exp_grf = np.exp(grf)
 
     def _vector_to_xarray(self, x):
-        return xr.DataArray(
-            x.reshape(self.coords['x'].size, self.coords['y'].size),
-            coords={'x': self.coords['x'], 'y': self.coords['y']})
+        return xr.DataArray(x.reshape(self.coords['x'].size, self.coords['y'].size), self.coords)
 
     def _xarray_to_vector(self, x):
         x = x.data.ravel()
@@ -53,10 +51,11 @@ class EHTOperator(LinearOperator):
         return x
 
     def _matvec(self, x):
-        movie = (self.exp_grf * self._vector_to_xarray(x)).noisy_methods.to_world_coords(
-            tstart=self.obs.tstart, tstop=self.obs.tstop, fov=self.fov)
-        output = ehtf.compute_block_visibilities(movie, psize=self.psize, fft_pad_factor=self.fft_pad_factor, obs=self.obs)
-        return np.array(output.data)
+        output = ehtf.compute_block_visibilities(
+            self.exp_grf * self._vector_to_xarray(x),
+            psize=self.measurements.psize, fft_pad_factor=self.fft_pad_factor)
+        output = self._xarray_to_vector(output.where(np.isfinite(self.measurements)))
+        return output
 
     def _rmatvec(self, x):
         x3d = np.zeros_like(self.measurements)

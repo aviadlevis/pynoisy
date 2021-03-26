@@ -31,13 +31,13 @@ def load_modes(path, dtype=float):
         raise AttributeError('dtype is either float or complex')
     return modes
 
-def visualization_2d(residuals, ax=None, degree=None, contours=False):
+def visualization_2d(residuals, ax=None, degree=None, contours=False, rasterized=False, vmax=None, cmap=None):
     if ax is None:
         fig, ax = plt.subplots(1,1, figsize=(5, 4))
     dataset = residuals.sel(deg=degree) if degree else residuals
     minimum = dataset[dataset.argmin(dim=['temporal_angle', 'spatial_angle'])].coords
-    dataset.plot(ax=ax, add_labels=False)
-    ax.scatter(minimum['temporal_angle'], minimum['spatial_angle'], s=100, c='r', marker='o', label='Global minima')
+    dataset.plot(ax=ax, add_labels=False, rasterized=rasterized, vmax=vmax, cmap=cmap)
+    ax.scatter(minimum['temporal_angle'], minimum['spatial_angle'], s=100, c='r', marker='o', label='Global minimum')
     if hasattr(residuals, 'true_temporal_angle'):
         ax.scatter(residuals.true_temporal_angle, residuals.true_spatial_angle, s=100, c='w', marker='^', label='True')
     if contours:
@@ -48,13 +48,12 @@ def visualization_2d(residuals, ax=None, degree=None, contours=False):
     ax.set_ylabel('Spatial angle [rad]', fontsize=12)
     ax.legend(facecolor='white', framealpha=0.4)
 
-def sample_eht(measurements, obs, conjugate=False, format='array'):
+
+def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
     obslist = obs.tlist()
     u = np.concatenate([obsdata['u'] for obsdata in obslist])
     v = np.concatenate([obsdata['v'] for obsdata in obslist])
-    uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
-    obstimes = [obsdata[0]['time'] for obsdata in obslist]
-    t = np.repeat(obstimes, uv_per_t)
+    t = np.concatenate([obsdata['time'] for obsdata in obslist])
 
     if conjugate:
         t = np.concatenate((t, t))
@@ -62,37 +61,41 @@ def sample_eht(measurements, obs, conjugate=False, format='array'):
         v = np.concatenate((v, -v))
 
     if format == 'movie':
-        data = measurements.sel(
+        # For static images duplicate temporal dimension
+        if 't' not in fourier.coords:
+            obstimes = [obsdata[0]['time'] for obsdata in obslist]
+            fourier = fourier.expand_dims(t=obstimes)
+
+        data = fourier.sel(
             t=xr.DataArray(t, dims='index'),
             u=xr.DataArray(v, dims='index'),
             v=xr.DataArray(u, dims='index'), method='nearest'
         )
-        eht_measurements = xr.full_like(measurements, fill_value=np.nan)
-        eht_measurements.attrs.update(measurements.attrs)
+        eht_measurements = xr.full_like(fourier, fill_value=np.nan)
+        eht_measurements.attrs.update(fourier.attrs)
         eht_measurements.attrs.update(source=obs.source)
         eht_measurements.loc[{'t': data.t, 'u': data.u, 'v': data.v}] = data
 
     elif format == 'array':
-        eht_measurements = measurements.interp(
-            t=xr.DataArray(t, dims='index'),
-            u=xr.DataArray(v, dims='index'),
-            v=xr.DataArray(u, dims='index')
-        )
+        eht_coords = {'u': xr.DataArray(v, dims='index'), 'v': xr.DataArray(u, dims='index')}
+        if 't' in fourier.coords:
+            eht_coords.update(t=xr.DataArray(t, dims='index'))
+        eht_measurements = fourier.interp(eht_coords, method=method)
     else:
         raise NotImplementedError('format {} not implemented'.format(format))
 
     return eht_measurements
 
-def opening_angles_vis_residuals(files, measurements, envelope=None, damp=1.0, degree=np.inf, fft_pad_factor=1,
-                                 return_coefs=False):
-    fov = measurements.fov if 'fov' in measurements.attrs else 1.0
-    fft_pad_factor = measurements.fft_pad_factor if 'fft_pad_factor' in measurements.attrs else fft_pad_factor
-    if envelope is not None:
-        envelope_fourier = ehtf.compute_block_visibilities(envelope, measurements.psize, fft_pad_factor=fft_pad_factor)
-        envelope_eht = envelope_fourier.expand_dims(t=measurements.t).where(np.isfinite(measurements))
-        dynamic_measurements = measurements - envelope_eht
-        dynamic_measurements.attrs.update(measurements.attrs)
-        measurements = dynamic_measurements
+def opening_angles_vis_residuals(files, measurements, obs, envelope, interp_method='linear', damp=0.0, degree=np.inf,
+                                 fft_pad_factor=1, return_coefs=False, conjugate=False):
+
+    fov = float(envelope['x'].max() - envelope['x'].min())
+    envelope_fourier = ehtf.compute_block_visibilities(envelope, measurements.psize, fft_pad_factor=fft_pad_factor,
+                                                       conjugate=conjugate)
+    envelope_eht = sample_eht(envelope_fourier, obs, conjugate=conjugate, method=interp_method)
+    dynamic_measurements = measurements - envelope_eht
+    dynamic_measurements.attrs.update(measurements.attrs)
+    measurements = dynamic_measurements
 
     residuals, coefficients = [], []
     for file in tqdm(files):
@@ -105,8 +108,19 @@ def opening_angles_vis_residuals(files, measurements, envelope=None, damp=1.0, d
             modes_reduced = modes.sel(temporal_angle=temporal_angle).isel(deg=slice(degree)).dropna('deg')
             movies = modes_reduced.eigenvectors * envelope if envelope is not None else modes_reduced.eigenvectors
             movies = movies * modes_reduced.eigenvalues
-            fourier = ehtf.compute_block_visibilities(movies=movies, psize=measurements.psize, fft_pad_factor=fft_pad_factor)
-            subspace = fourier.where(np.isfinite(measurements))
+
+            # Split subspace for large fft_pad_factor memory req
+            subspace = []
+            slice_size = int( np.ceil(movies.deg.size / fft_pad_factor))
+            for i in range(fft_pad_factor):
+                modes_fourier = ehtf.compute_block_visibilities(
+                    movies=movies.isel(deg=slice(i*slice_size, (i+1)*slice_size)),
+                    psize=measurements.psize, fft_pad_factor=fft_pad_factor)
+                modes_eht = sample_eht(modes_fourier, obs, conjugate=conjugate, method=interp_method)
+                subspace.append(modes_eht)
+                del modes_fourier
+            subspace = xr.concat(subspace, dim='deg')
+
             output = pynoisy.algebra_utils.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
 
             if return_coefs:
@@ -125,10 +139,8 @@ def opening_angles_vis_residuals(files, measurements, envelope=None, damp=1.0, d
 
     residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
     residuals.attrs.update(measurements.attrs)
-    residuals.attrs.update(file_num=len(files),
-                           damp=damp,
-                           fov=fov,
-                           fft_pad_factor=fft_pad_factor,
+    residuals.attrs.update(file_num=len(files), damp=damp,
+                           interp_method=interp_method, fov=fov, conjugate=str(conjugate),
                            with_envelope='False' if envelope is None else 'True')
     output = residuals
     if return_coefs:
@@ -367,7 +379,7 @@ def grmhd_preprocessing(movie, flux_threshold=1e-10):
     measurements = measurements - measurements.mean('t')
     return measurements
 
-def multiple_animations(movie_list, axes, vmin=None, vmax=None, titles=None, ticks=False, fps=10, output=None, cmaps='viridis'):
+def multiple_animations(movie_list, axes, vmin=None, vmax=None, titles=None, ticks=False, add_colorbars=True, fps=10, output=None, cmaps='viridis'):
     """TODO"""
     # animation function.  This is called sequentially
     def animate(i):
@@ -396,9 +408,10 @@ def multiple_animations(movie_list, axes, vmin=None, vmax=None, titles=None, tic
             ax.set_yticks([])
         ax.set_title(title)
         im = ax.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes('right', size='5%', pad=0.05)
-        fig.colorbar(im, cax=cax)
+        if add_colorbars:
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im, cax=cax)
         im.set_clim(vmin, vmax)
         images.append(im)
 
@@ -472,36 +485,36 @@ class noisy_methods(object):
         )
         return tensor
 
-    def plot_principal_axis(self, downscale_factor=8, mode='noisy'):
+    def plot_principal_axis(self, downscale_factor=8, mode='noisy', color='black', alpha=1.0, width=None, scale=None):
         """TODO"""
         assert mode in ['noisy', 'hgrf'], "Mode is either noisy or hgrf"
         angle = self._obj.spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
         x, y = np.meshgrid(angle.x, angle.y, indexing='xy')
         if mode == 'noisy':
-            plt.quiver(x, y, np.sin(angle), np.cos(angle))
+            plt.quiver(x, y, np.sin(angle), np.cos(angle), headaxislength=0, headlength=0, color=color, alpha=alpha, width=width, scale=scale)
         elif mode == 'hgrf':
-            plt.quiver(y, x, np.sin(angle), np.cos(angle))
+            plt.quiver(y, x, np.sin(angle), np.cos(angle), headaxislength=0, headlength=0, color=color, alpha=alpha, width=width, scale=scale)
         plt.title('Diffusion tensor (primary)', fontsize=18)
 
-    def plot_secondary_axis(self, downscale_factor=8, mode='noisy'):
+    def plot_secondary_axis(self, downscale_factor=8, mode='noisy', color='black', alpha=1.0, width=None, scale=None):
         """TODO"""
         assert mode in ['noisy', 'hgrf'], "Mode is either noisy or hgrf"
         angle = self._obj.spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
         x, y = np.meshgrid(angle.x, angle.y, indexing='xy')
         if mode == 'noisy':
-            plt.quiver(x, y, np.cos(angle), -np.sin(angle))
+            plt.quiver(x, y, np.cos(angle), -np.sin(angle), headaxislength=0, headlength=0, color=color, alpha=alpha, width=width, scale=scale)
         elif mode == 'hgrf':
-            plt.quiver(y, x, np.cos(angle), -np.sin(angle))
+            plt.quiver(y, x, np.cos(angle), -np.sin(angle), headaxislength=0, headlength=0, color=color, alpha=alpha, width=width, scale=scale)
         plt.title('Diffusion tensor (secondary)', fontsize=18)
 
-    def plot_velocity(self, downscale_factor=8, mode='noisy'):
+    def plot_velocity(self, downscale_factor=8, mode='noisy', color='black', width=None, scale=None):
         """TODO"""
         v = self._obj.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
         x, y = np.meshgrid(v.x, v.y, indexing='xy')
         if mode == 'noisy':
-            plt.quiver(x, y, v.vy, v.vx)
+            plt.quiver(x, y, v.vy, v.vx, color=color, width=width, scale=scale)
         elif mode == 'hgrf':
-            plt.quiver(y, x, v.vx, v.vy)
+            plt.quiver(y, x, v.vx, v.vy, color=color, width=width, scale=scale)
         plt.title('Velocity field', fontsize=18)
 
     def plot_statistics(self):
@@ -515,7 +528,7 @@ class noisy_methods(object):
         ax.fill_between(x_range, mean + std, mean - std, facecolor='blue', alpha=0.5)
         ax.set_xlim([x_range.min(), x_range.max()])
         
-    def get_animation(self, vmin=None, vmax=None, fps=10, output=None, cmap='afmhot', ax=None):
+    def get_animation(self, vmin=None, vmax=None, fps=10, output=None, cmap='afmhot', ax=None, add_colorbar=True):
         """TODO"""
         # animation function.  This is called sequentially
         def animate(i):
@@ -536,7 +549,8 @@ class noisy_methods(object):
 
         # initialization function: plot the background of each frame
         im = ax.imshow(np.zeros((nx, ny)), extent=extent, origin='lower', cmap=cmap)
-        fig.colorbar(im)
+        if add_colorbar:
+            fig.colorbar(im)
         vmin = self._obj.min() if vmin is None else vmin
         vmax = self._obj.max() if vmax is None else vmax
         im.set_clim(vmin, vmax)

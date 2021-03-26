@@ -36,7 +36,7 @@ def array_to_obs(array, obs, tadv, tint, tstart=None, tstop=None):
     new_obs.source = 'SYNTHETIC'
     return new_obs
 
-def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=None, return_coords=False):
+def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, conjugate=False):
     """
     Modification of ehtim's observe_same_nonoise method.
 
@@ -47,7 +47,7 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=
         obs (Obsdata): ehtim observation data containing the array geometry and measurement times.
                       If obs=None this function returns the full Fourier transform.
         fft_pad_factor (float):  a padding factor for increased fft resolution.
-        return_coords (bool): return the full fourier coordinates.
+        conjugate (bool): negative frequencies (conjugate for real data)
     Returns:
         block_vis(xr.DataArray): a data array of shape (num_movies, num_visibilities) and dtype np.complex128.
 
@@ -77,7 +77,6 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=
     block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
     block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
     block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
-    fourier_coords = block_fourier.coords
 
     if obs is None:
         # Extra phase to match centroid convention
@@ -94,9 +93,16 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=
         obslist = obs.tlist()
         u = np.concatenate([obsdata['u'] for obsdata in obslist])
         v = np.concatenate([obsdata['v'] for obsdata in obslist])
-        uv_per_t = np.array([len(obsdata['v']) for obsdata in obslist])
-        obstimes = [obsdata[0]['time'] for obsdata in obslist]
-        t = np.repeat(obstimes, uv_per_t)
+        t = np.concatenate([obsdata['time'] for obsdata in obslist])
+
+        if conjugate:
+            t = np.concatenate((t, t))
+            u = np.concatenate((u, -u))
+            v = np.concatenate((v, -v))
+            sort_idx = np.argsort(t)
+            t = t[sort_idx]
+            u = u[sort_idx]
+            v = v[sort_idx]
 
         # Extra phase to match centroid convention
         phase = np.exp(-1j * np.pi * psize * ((1 + movies.x.size % 2) * u + (1 + movies.y.size % 2) * v))
@@ -104,20 +110,16 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=
         # Pulse function
         pulsefac = trianglePulse_F(2 * np.pi * u, psize) * trianglePulse_F(2 * np.pi * v, psize)
 
-        # For static images duplicate temporal dimension
-        if 't' not in block_fourier.coords:
-            block_fourier = block_fourier.expand_dims(t=obstimes)
-
         block_fourier = block_fourier.assign_coords(
-            t2=('t', range(block_fourier.t.size)),
             u2=('u', range(block_fourier.u.size)),
             v2=('v', range(block_fourier.v.size))
         )
-        tuv2 = np.vstack((block_fourier.t2.interp(t=t),
-                          block_fourier.v2.interp(v=v),
-                          block_fourier.u2.interp(u=u)))
+        tuv2 = np.vstack((block_fourier.v2.interp(v=v), block_fourier.u2.interp(u=u)))
+        if 't' in block_fourier.coords:
+            block_fourier = block_fourier.assign_coords(t2=('t', range(block_fourier.t.size)))
+            tuv2 = np.vstack((tuv2, block_fourier.t2.interp(t=t)))
 
-        if block_fourier.ndim == 3:
+        if (block_fourier.ndim == 2) or (block_fourier.ndim == 3):
             visre = nd.map_coordinates(np.ascontiguousarray(np.real(block_fourier).data), tuv2)
             visim = nd.map_coordinates(np.ascontiguousarray(np.imag(block_fourier).data), tuv2)
             vis = visre + 1j * visim
@@ -145,8 +147,7 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, tlist=
         block_vis = block_vis.assign_coords(t=('index', t), u=('index', v), v=('index', u))
     block_vis.attrs.update(movies.attrs)
     block_vis.attrs.update(psize=psize, fft_pad_factor=fft_pad_factor)
-    output = block_vis if return_coords is False else (block_vis, fourier_coords)
-    return output
+    return block_vis
 
 def compute_block_visibilities_adjoint(movies, fov=1, fft_pad_factor=2):
     """
