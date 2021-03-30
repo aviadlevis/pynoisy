@@ -97,8 +97,8 @@ def general_xy_correlation_length(r, lam=5.0, r_cutoff=0.5):
     """
     correlation_length = lam * r
     if r_cutoff > 0.0:
-        correlation_length.values[r < r_cutoff] = correlation_length.utils2d.cutoff(
-            r_cutoff, lam * r_cutoff, lam, 0.9 * lam * r_cutoff).values[r < r_cutoff]
+        correlation_length.values[(r < r_cutoff).data] = correlation_length.polar.r_cutoff(
+            r_cutoff, lam * r_cutoff, lam, 0.9 * lam * r_cutoff).values[(r < r_cutoff).data]
     correlation_length.name = 'correlation_length'
     correlation_length.attrs.update({
         'lam': lam,
@@ -130,11 +130,11 @@ def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
     ----------
     https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L169
     """
-    correlation_time = 2.0 * np.pi * tau / np.abs(r.utils2d.w_keplerian(r_cutoff))
+    correlation_time = 2.0 * np.pi * tau / np.abs(r.polar.w_keplerian(r_cutoff))
     if r_cutoff > 0.0:
-        correlation_time.values[r < r_cutoff] = correlation_time.utils2d.cutoff(
+        correlation_time.values[(r < r_cutoff).data] = correlation_time.polar.r_cutoff(
             r_cutoff, 2 * np.pi * tau * r_cutoff ** 1.5, 2 * np.pi * tau * 1.5 * np.sqrt(r_cutoff),
-                      0.9 * 2 * np.pi * tau * r_cutoff ** 1.5).values[r < r_cutoff]
+                      0.9 * 2 * np.pi * tau * r_cutoff ** 1.5).values[(r < r_cutoff).data]
     correlation_time.name = 'correlation_time'
     correlation_time.attrs.update({
         'tau': tau,

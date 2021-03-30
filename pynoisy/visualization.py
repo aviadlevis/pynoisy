@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib import animation
+
 from ipywidgets import interact, fixed
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -69,8 +70,8 @@ def compare_movie_frames(frames1, frames2, scale='amp'):
 
 @xr.register_dataarray_accessor("visualization")
 class visualization(object):
-    def __init__(self, data_array):
-        self._obj = data_array
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
 
     def animate(self, t_dim='t', ax=None, vmin=None, vmax=None, cmap=None, add_ticks=True, add_colorbar=True,
                 fps=10, output=None):
@@ -240,7 +241,7 @@ class visualization(object):
         color : color or color sequence, optional
             Explicit color(s) for the arrows. If *C* has been set, *color* has no effect.
         alpha: float (0, 1.0)
-            Alpha transpracy for the quiver.
+            Alpha transparency for the quiver.
         width: float, optional
             Width of the arrows.
         scale : float, optional
@@ -281,7 +282,7 @@ class visualization(object):
         color : color or color sequence, optional
             Explicit color(s) for the arrows. If *C* has been set, *color* has no effect.
         alpha: float (0, 1.0)
-            Alpha transpracy for the quiver.
+            Alpha transparency for the quiver.
         width: float, optional
             Width of the arrows.
         scale : float, optional
@@ -322,7 +323,7 @@ class visualization(object):
         color : color or color sequence, optional
             Explicit color(s) for the arrows. If *C* has been set, *color* has no effect.
         alpha: float (0, 1.0)
-            Alpha transpracy for the quiver.
+            Alpha transparency for the quiver.
         width: float, optional
             Width of the arrows.
         scale : float, optional

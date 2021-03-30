@@ -47,7 +47,7 @@ def general_xy(nx, ny, opening_angle=0.0, direction='ccw', r_cutoff=0.5, grid_st
         raise AttributeError('Direction can be either cw or ccw, not {}'.format(direction))
 
     grid = pynoisy.utils.linspace_2d((nx, ny), grid_start, grid_end)
-    magnitude = np.abs(grid.r.utils2d.w_keplerian(r_cutoff)) * grid.r
+    magnitude = np.abs(grid.polar.w_keplerian(r_cutoff)) * grid.r
     vx = direction_value * magnitude * np.cos(-grid.theta - opening_angle)
     vy = direction_value * magnitude * np.sin(-grid.theta - opening_angle)
 

@@ -40,16 +40,16 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(False, False
     num = (num, num) if np.isscalar(num) else num
     x = np.linspace(start[0], stop[0], num[0], endpoint=endpoint[0])
     y = np.linspace(start[1], stop[1], num[1], endpoint=endpoint[1])
-    grid = xr.DataArray(dims=['x', 'y'], coords={'x': x, 'y': y}).utils2d.update_polar_coords()
+    grid = xr.DataArray(dims=['x', 'y'], coords={'x': x, 'y': y}).polar.add_coords()
     return grid
 
-@xr.register_dataset_accessor("utils2d")
-@xr.register_dataarray_accessor("utils2d")
-class utils2d(object):
-    def __init__(self, data_array):
-        self._obj = data_array
+@xr.register_dataset_accessor("polar")
+@xr.register_dataarray_accessor("polar")
+class PolarAccessor(object):
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
 
-    def update_polar_coords(self):
+    def add_coords(self):
         """
         Add polar coordinates to x,y grid.
         """
@@ -61,7 +61,7 @@ class utils2d(object):
         theta = np.arctan2(yy, xx)
         return self._obj.assign_coords({'r': (['x', 'y'], r), 'theta': (['x', 'y'], theta)})
 
-    def cutoff(self, r0, fr0, dfr0, f0):
+    def r_cutoff(self, r0, fr0, dfr0, f0):
         """
         Smooth cutoff at radius r0 (continuous + once differentiable at r0).
 
@@ -80,7 +80,7 @@ class utils2d(object):
         ----------
         https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L97
         """
-        output = self._obj if 'r' in self._obj.coords else self._obj.utils2d.update_polar_coords()
+        output = self._obj if 'r' in self._obj.coords else self._obj.polar.add_coords()
         r = output['r']
         b = (2. * (fr0 - f0) - r0 * dfr0) / r0 ** 3
         a = (fr0 - f0) / (b * r0 * r0) + r0
@@ -101,21 +101,20 @@ class utils2d(object):
             A DataArray of Keplerian orbital frequency on an x,y grid.
         """
         if 'r' not in self._obj.coords:
-            self._obj.utils2d.update_polar_coords()
+            self._obj.polar.add_coords()
         r = self._obj['r']
         w = r ** (-1.5)
         if r_cutoff > 0.0:
-            w.values[r < r_cutoff] = w.utils2d.cutoff(
-                r_cutoff, r_cutoff ** (-1.5), -1.5 * r_cutoff ** (-2.5), 0.9 * r_cutoff ** (-1.5)).values[r < r_cutoff]
+            w.values[(r < r_cutoff).data] = w.polar.r_cutoff(r_cutoff, r_cutoff ** (-1.5), -1.5 * r_cutoff ** (-2.5),
+                                                             0.9 * r_cutoff ** (-1.5)).values[(r < r_cutoff).data]
         w.name = 'w_keplerian'
         w.attrs.update(r_cutoff=r_cutoff)
         return w
 
-
-@xr.register_dataset_accessor("compute")
-class compute(object):
-    def __init__(self, dataset):
-        self._obj = dataset
+@xr.register_dataset_accessor("tensor")
+class TensorAccessor(object):
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
 
     def diffusion_coefficient(self, threshold=1e-8):
         """
@@ -167,8 +166,7 @@ class compute(object):
         else:
             raise AttributeError('Dataset has to contain both vx and vy')
 
-
-    ###################
+#########
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
