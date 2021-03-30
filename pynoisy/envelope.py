@@ -1,7 +1,6 @@
 """
 TODO: Some documentation and general description goes here.
 """
-import noisy_core
 import xarray as xr
 import pynoisy.utils as utils
 import numpy as np

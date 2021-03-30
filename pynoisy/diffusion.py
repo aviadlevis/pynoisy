@@ -1,197 +1,173 @@
 """
-TODO: Some documentation and general description goes here.
+The diffusion fields define the spatio-temporal correlations of the stochastic features.
+A diffusion model creates an xarray dataset with the fields:
+    correlation_length, correlation_time, spatial_angle, tensor_radio (scalar)
+
+References
+----------
+.. [1] Lee, D. and Gammie, C.F., 2021. Disks as Inhomogeneous, Anisotropic Gaussian Random Fields.
+    The Astrophysical Journal, 906(1), p.39.
+    url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 """
-import noisy_core, hgrf_core
 import numpy as np
 import xarray as xr
-import pynoisy.utils as utils
+import pynoisy.utils
 
-def grid(spatial_angle, correlation_time, correlation_length, tensor_ratio, diffusion_coefficient=None):
-    assert spatial_angle.shape == correlation_time.shape  == correlation_length.shape, \
-        'shapes of (spatial_angle, correlation_time, correlation_length) have to match.'
-    _grid = utils.get_grid(*spatial_angle.shape)
-    if diffusion_coefficient is None:
-        diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
-    else:
-        correlation_length = np.sqrt(0.5 * diffusion_coefficient * correlation_time)
-    diffusion = xr.Dataset(
-        data_vars={
-            'spatial_angle': (_grid.dims, spatial_angle),
-            'correlation_time': (_grid.dims, correlation_time),
-            'correlation_length': (_grid.dims, correlation_length),
-            'diffusion_coefficient': (_grid.dims, diffusion_coefficient),
-            'tensor_ratio': tensor_ratio
-        },
-        coords=_grid.coords,
-        attrs={'diffusion_model': 'grid'}
-    )
-    return diffusion
-
-def ring(nx, ny, tensor_ratio=0.1, opening_angle=np.pi / 3.0, tau=1.0, lam=0.5, scaling_radius=0.2):
+def general_xy(nx, ny, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
+               grid_start=(-10, -10), grid_end=(10, 10)):
     """
-    TODO
+    Diffusion fields defined by the general_xy model [1].
 
     Parameters
     ----------
-    opening_angle: float, default= pi/3
-        This angle defines the opening angle of spirals with respect to the local radius
-    tau: float, default=1.0
-        product of correlation time and local Keplerian frequency
-    lam: float, default=0.5
-        ratio of correlation length to local radius
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
-    tensor_ratio: float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    """
-    diffusion = grid(
-        spatial_angle=noisy_core.get_disk_angle(nx, ny, opening_angle),
-        correlation_time=noisy_core.get_disk_correlation_time(nx, ny, tau, scaling_radius),
-        correlation_length=noisy_core.get_disk_correlation_length(nx, ny, scaling_radius, lam),
-        tensor_ratio=tensor_ratio
-    )
-    new_attrs = {
-        'diffusion_model': 'ring',
-        'opening_angle': opening_angle,
-        'tau': tau,
-        'lam': lam,
-        'scaling_radius': scaling_radius
-    }
-    diffusion.attrs.update(new_attrs)
-    return diffusion
-
-def multivariate_gaussian(nx, ny, length_scale=0.1, tensor_ratio=0.1, max_diffusion_coef=1.0, max_correlation_time=1.0):
-    """
-    TODO
-
-    Parameters
-    ----------
-    length_scale : float or array with shape (n_features,), default: 1.0
-        The length scale of the kernel. If a float, an isotropic kernel is
-        used. If an array, an anisotropic kernel is used where each dimension
-        of l defines the length-scale of the respective feature dimension.
-    tensor_ratio: float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    """
-    covariance = utils.matern_covariance(length_scale=length_scale)
-
-    print('Sampling diffusion principle angle from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
-    spatial_angle = np.random.multivariate_normal(np.zeros(x.size), covariance)
-
-    print('Sampling correlation time from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
-    correlation_time = np.random.multivariate_normal(np.zeros(x.size), covariance)
-    correlation_time = np.exp(correlation_time)
-    correlation_time = max_correlation_time * correlation_time / correlation_time.max()
-
-    print('Sampling diffusion coefficient from a multivariate gaussian (Matern covariance kernel size = {}x{})'.format(*covariance.shape))
-    diffusion_coefficient = np.random.multivariate_normal(np.zeros(x.size), covariance)
-    diffusion_coefficient = max_diffusion_coef * (diffusion_coefficient - diffusion_coefficient.min()) / \
-                            (diffusion_coefficient.max() - diffusion_coefficient.min())
-
-    # diffusion_coefficient = 2.0 * correlation_length ** 2 / correlation_time
-    correlation_length = np.sqrt(0.5 * diffusion_coefficient * correlation_time)
-
-    diffusion = grid(
-        spatial_angle=spatial_angle.reshape(x.shape),
-        correlation_time=correlation_time.reshape(x.shape),
-        correlation_length=correlation_length.reshape(x.shape),
-        tensor_ratio=tensor_ratio
-    )
-    diffusion['covariance'] = xr.DataArray(covariance, coords=[x.ravel(), y.ravel()], dims=['i', 'j'])
-    new_attrs = {
-        'diffusion_model': 'multivariate_gaussian',
-        'kernel': 'Matern',
-        'length_scale': length_scale,
-        'max_diffusion_coef': max_diffusion_coef,
-        'max_corr_time': max_correlation_time,
-        'spatial_angle_model': 'unnormalized',
-        'corr_time_model': 'normalized (exponential)',
-        'diffusion_coef_model': 'normalized (linear)'
-    }
-    diffusion.attrs.update(new_attrs)
-    return diffusion
-
-def disk(nx, ny, tensor_ratio=0.1, direction='cw', tau=1.0, scaling_radius=0.2):
-    """
-    TODO
-
-    Parameters
-    ----------
-    direction: str, default='cw'
-        'cw' or 'ccw' for clockwise or counter-clockwise directions.
-    tau: float, default=1.0
-        product of correlation time and local Keplerian frequency.
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
-    tensor_ratio: float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    """
-    assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
-    direction = -1 if direction is 'cw' else 1
-
-    diffusion = grid(
-        spatial_angle=noisy_core.get_disk_angle(nx, ny, -direction * np.pi / 2),
-        correlation_time=noisy_core.get_disk_correlation_time(nx, ny, tau, scaling_radius),
-        correlation_length=np.exp(-0.5 * (utils.get_grid().r / scaling_radius) ** 2),
-        tensor_ratio=tensor_ratio
-    )
-    new_attrs = {
-        'diffusion_model': 'disk',
-        'tensor_ratio': tensor_ratio,
-        'direction': direction,
-        'tau': tau,
-        'scaling_radius': scaling_radius
-    }
-    diffusion.attrs.update(new_attrs)
-    return diffusion
-
-def general_xy(nx, ny, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, scaling_radius=0.5, flat_variability=False):
-    """
-    TODO
-
-    Parameters
-    ----------
+    nx: int,
+        Number of x-axis grid points.
+    ny: int,
+        Number of y-axis grid points.
     opening_angle: float, default= np.pi/2 - np.pi/9
         This angle defines the opening angle of spirals with respect to the local radius
     tau: float, default=1.0
-        product of correlation time and local Keplerian frequency.
+        Product of correlation time and local Keplerian frequency.
+    lam: float, default=5.0
+        Ratio of correlation length to local radius
+    tensor_ratio (r12): float, default=0.1
+        Ratio for the diffusion tensor along the two principal axis.
+    r_cutoff: float
+        Cutoff radius for a smooth center point.
+    grid_start: (float, float)
+        (x, y) starting grid point (included in the grid). Units of x in terms of M.
+    grid_end: (float, float), default=(-10, 10)
+        (x, y) ending grid point (end point not included in the grid). Units of y in terms of M.
+
+    Returns
+    -------
+    diffusion: xr.Dataset
+        A Dataset containing the following fields:
+            - correlation_length (2D field)
+            - correlation_time (2D field)
+            - spatial_angle (2D field)
+            - tensor_radio (scalar)
+
+    References
+    ----------
+    .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
+    """
+    grid = pynoisy.utils.linspace_2d((nx, ny), grid_start, grid_end)
+    correlation_time = general_xy_correlation_time(grid.r, tau, r_cutoff)
+    correlation_length = general_xy_correlation_length(grid.r, lam, r_cutoff)
+    spatial_angle = general_xy_spatial_angle(grid.theta, opening_angle)
+
+    diffusion = xr.Dataset(
+        data_vars={
+            'spatial_angle': (grid.dims, spatial_angle),
+            'correlation_time': (grid.dims, correlation_time),
+            'correlation_length': (grid.dims, correlation_length),
+            'tensor_ratio': tensor_ratio
+        },
+        coords=grid.coords,
+        attrs={'diffusion_model': 'general_xy'}
+    )
+    diffusion.attrs.update(correlation_time.attrs)
+    diffusion.attrs.update(correlation_length.attrs)
+    diffusion.attrs.update(spatial_angle.attrs)
+    return diffusion
+
+def general_xy_correlation_length(r, lam=5.0, r_cutoff=0.5):
+    """
+    Compute azimuthal symetric correlation length on a grid according to general_xy.
+    Source: inoisy/src/param_general_xy.c
+
+    Parameters
+    ----------
+    r: xr.DataArray
+        A DataArray with the radial coordinates on a 2D grid.
     lam: float, default=5.0
         ratio of correlation length to local radius
-    tensor_ratio (r12): float, default=0.1
-        ratio for the diffusion tensor along the two principal axis.
-    scaling_radius: float, default=0.5
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity).
-    flat_variability: bool
-        If flat_magnitude is set to True, the correlation_time and correlation_length is flattened to equal the mean
-        If flat_magnitude is set to False, the correlation_time and correlation_length varies radially
+    r_cutoff: float
+        Cutoff radius for a smooth center point.
+
+    Returns
+    -------
+    correlation_time: xr.DataArray
+        A DataArray with corrlation length on a grid.
+
+    References
+    ----------
+    https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L156
     """
-    if type(flat_variability) != bool:
-        raise AttributeError
+    correlation_length = lam * r
+    if r_cutoff > 0.0:
+        correlation_length.values[r < r_cutoff] = correlation_length.utils2d.cutoff(
+            r_cutoff, lam * r_cutoff, lam, 0.9 * lam * r_cutoff).values[r < r_cutoff]
+    correlation_length.name = 'correlation_length'
+    correlation_length.attrs.update({
+        'lam': lam,
+        'r_cutoff': r_cutoff
+    })
+    return correlation_length
 
-    correlation_time = hgrf_core.get_generalxy_correlation_time(nx, ny, tau, scaling_radius)
-    correlation_length = hgrf_core.get_generalxy_correlation_length(nx, ny, scaling_radius, lam)
-    spatial_angle = hgrf_core.get_generalxy_spatial_angle(nx, ny, scaling_radius, opening_angle)
 
-    if flat_variability:
-        correlation_time[:] = correlation_time.mean()
-        correlation_length[:] = correlation_length.mean()
+def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
+    """
+    Compute azimuthal symetric correlation time on a grid according to general_xy.
+    Source: inoisy/src/param_general_xy.c
 
-    diffusion = grid(spatial_angle=spatial_angle,
-                     correlation_time=correlation_time,
-                     correlation_length=correlation_length,
-                     tensor_ratio=tensor_ratio)
+    Parameters
+    ----------
+    r: xr.DataArray
+        A DataArray with the radial coordinates on a 2D grid.
+    tau: float, default=1.0
+        product of correlation time and local Keplerian frequency.
+    r_cutoff: float
+        Cutoff radius for a smooth center point.
 
-    new_attrs = {
-            'diffusion_model': 'general_xy',
-            'opening_angle': opening_angle,
-            'tau': tau,
-            'lam': lam,
-            'scaling_radius': scaling_radius,
-            'flat_variability': str(flat_variability)
-    }
+    Returns
+    -------
+    correlation_time: xr.DataArray
+        A DataArray with corrlation time on a grid.
 
-    diffusion.attrs.update(new_attrs)
-    return diffusion
+    References
+    ----------
+    https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L169
+    """
+    correlation_time = 2.0 * np.pi * tau / np.abs(r.utils2d.w_keplerian(r_cutoff))
+    if r_cutoff > 0.0:
+        correlation_time.values[r < r_cutoff] = correlation_time.utils2d.cutoff(
+            r_cutoff, 2 * np.pi * tau * r_cutoff ** 1.5, 2 * np.pi * tau * 1.5 * np.sqrt(r_cutoff),
+                      0.9 * 2 * np.pi * tau * r_cutoff ** 1.5).values[r < r_cutoff]
+    correlation_time.name = 'correlation_time'
+    correlation_time.attrs.update({
+        'tau': tau,
+        'r_cutoff': r_cutoff
+    })
+    return correlation_time
+
+
+def general_xy_spatial_angle(theta, opening_angle=np.pi / 2 - np.pi / 9):
+    """
+    Compute angle of spatial correlation on a grid according to general_xy.
+    Source: inoisy/src/param_general_xy.c
+
+    Parameters
+    ----------
+    theta: xr.DataArray
+        A DataArray with the azimuthal coordinates on a 2D grid.
+    opening_angle: float, default= np.pi/2 - np.pi/9
+        This angle defines the opening angle of spirals with respect to the local radius
+
+    Returns
+    -------
+    spatial_angle: xr.DataArray
+        A DataArray with angle of spatial correlation on a grid.
+
+    References
+    ----------
+    https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L213
+    """
+    spatial_angle = theta + opening_angle
+    spatial_angle.name = 'spatial_angle'
+    spatial_angle.attrs.update(opening_angle=opening_angle)
+    return spatial_angle
 
 
 

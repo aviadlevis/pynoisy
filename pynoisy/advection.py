@@ -1,111 +1,62 @@
 """
-TODO: Some documentation and general description goes here.
+The advection velocity fields define the motion of the stochastic features.
+An advection model creates an xarray dataset with the fields: vx, vy.
+
+References
+----------
+.. [1] Lee, D. and Gammie, C.F., 2021. Disks as Inhomogeneous, Anisotropic Gaussian Random Fields.
+    The Astrophysical Journal, 906(1), p.39.
+    url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 """
-import noisy_core, hgrf_core
-import xarray as xr
-import pynoisy.utils as utils
 import numpy as np
+import xarray as xr
+import pynoisy.utils
 
-def grid(vx, vy):
-    assert vx.shape == vy.shape, 'vx.shape doesnt match vy.shape'
-    _grid = utils.get_grid(*vx.shape)
-    advection = xr.Dataset(
-        data_vars={'vx': (_grid.dims, vx), 'vy': (_grid.dims, vy)},
-        coords=_grid.coords,
-        attrs={'advection_model': 'grid'}
-    )
-    return advection
-
-def disk(nx, ny, direction='ccw', scaling_radius=0.2):
+def general_xy(nx, ny, opening_angle=0.0, direction='ccw', r_cutoff=0.5, grid_start=(-10, -10), grid_end=(10, 10)):
     """
-    TODO
+    Velocity fields (vx, vy) defined by the general_xy model [1].
 
     Parameters
     ----------
-    direction: str, default='cw'
-        'cw' or 'ccw' for clockwise or counter-clockwise directions.
-    scaling_radius: float, default=0.2
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
-    """
-    assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
-    direction_value = -1 if direction == 'cw' else 1
-    vy, vx = noisy_core.get_disk_velocity(nx, ny, direction_value, scaling_radius)
-    advection = grid(vx, vy)
-    new_attrs = {
-        'advection_model': 'disk',
-        'direction': direction,
-        'scaling_radius': scaling_radius
-    }
-    advection.attrs.update(new_attrs)
-    return advection
-
-
-def general_xy(nx, ny, direction='ccw', scaling_radius=0.5, opening_angle=0.0, scale=1.0, flat_magnitude=False):
-    """
-    TODO
-
-    Parameters
-    ----------
-    direction: str, default='ccw'
-        'cw' or 'ccw' for clockwise or counter-clockwise directions.
-    scaling_radius: float, default=0.5
-        scaling parameter for the Kepler orbital frequency (the magnitude of the velocity)
+    nx: int,
+        Number of x-axis grid points.
+    ny: int,
+        Number of y-axis grid points.
     opening_angle: float, default=0.0
         This angle defines the opening angle respect to the local azimuthal angle.
-        opening angle=0.0 is strictly rotational movement
-    flat_magnitude: bool or float
-        If flat_magnitude is set to True, the advection magnitude is flattened to equal the mean
-        If flat_magnitude is set to False the advection magnitude varies radially
-        If flat_magnitude is set to a scalar number this will be the magnitude of the advection
-    """
-    assert direction in ['cw', 'ccw'], 'Direction can be either cw or ccw, not {}'.format(direction)
-    direction_value = -1 if direction == 'ccw' else 1
-    vy, vx = hgrf_core.get_generalxy_velocity(nx, ny, direction_value, scaling_radius, opening_angle)
-    advection = grid(vx, vy)
-    new_attrs = {
-        'advection_model': 'general_xy',
-        'direction': direction,
-        'scaling_radius': scaling_radius,
-        'opening_angle': opening_angle,
-        'flat_magnitude': 'False'
-    }
-    advection.attrs.update(new_attrs)
-    advection.noisy_methods.update_angle_and_magnitude()
+        opening angle=0.0 is strictly rotational movement.
+    direction: str, default='ccw'
+        'cw' or 'ccw' for clockwise or counter-clockwise directions.
+    r_cutoff: float
+        Cutoff radius for a smooth center point.
 
-    if flat_magnitude:
-        flat_magnitude = advection.magnitude.mean() if flat_magnitude==True else flat_magnitude
-        advection.magnitude[:] = flat_magnitude
-        advection.attrs.update(flat_magnitude=flat_magnitude)
+    Returns
+    -------
+    advection: xr.Dataset
+        A Dataset containing the velocity field: (vx, vy) on a grid.
 
-    advection.magnitude[:] *= scale
-    advection.noisy_methods.update_vx_vy()
-
-    return advection
-
-def wind_sheer(nx, ny, angle, magnitude):
-    """
-    TODO
-
-    Parameters
+    References
     ----------
-    angle: float
-        Direction angle of wind sheer in radians.
-    magnitude: xr.DataArray
-        Magnitude of wind
+    .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
-    vx = np.empty((nx, ny))
-    vy = np.empty((nx, ny))
-    advection = grid(vx, vy)
+    if direction == 'ccw':
+        direction_value = -1
+    elif direction == 'cw':
+        direction_value = 1
+    else:
+        raise AttributeError('Direction can be either cw or ccw, not {}'.format(direction))
 
-    advection.update({
-        'angle': angle,
-        'magnitude': magnitude
-    })
-    new_attrs = {
-        'advection_model': 'wind_sheer',
-        'wind_angle': angle,
-    }
-    advection.attrs.update(new_attrs)
-    advection.noisy_methods.update_vx_vy()
-    advection.noisy_methods.update_angle_and_magnitude()
+    grid = pynoisy.utils.linspace_2d((nx, ny), grid_start, grid_end)
+    magnitude = np.abs(grid.r.utils2d.w_keplerian(r_cutoff)) * grid.r
+    vx = direction_value * magnitude * np.cos(-grid.theta - opening_angle)
+    vy = direction_value * magnitude * np.sin(-grid.theta - opening_angle)
+
+    advection = xr.Dataset(
+        data_vars={'vx': (grid.dims, vx), 'vy': (grid.dims, vy)},
+        coords=grid.coords,
+        attrs={'advection_model': 'general_xy',
+               'opening_angle': opening_angle,
+               'direction': direction,
+               'r_cutoff': r_cutoff}
+    )
     return advection

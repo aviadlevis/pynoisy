@@ -1,5 +1,4 @@
-import noisy_core
-import pynoisy.algebra_utils
+import pynoisy.linalg
 from pynoisy import eht_functions as ehtf
 import matplotlib.pyplot as plt
 import xarray as xr
@@ -12,6 +11,164 @@ import h5py
 import os
 from tqdm.auto import tqdm
 import gc
+
+def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(False, False)):
+    """
+    Return a 2D DataArray with coordinates spaced over a specified interval.
+
+    Parameters
+    ----------
+    num: int or tuple
+        Number of grid points. If num is a scalar the 2D coordinates are assumed to
+        have the same number of points.
+    start: (float, float)
+        (x, y) starting grid point (included in the grid)
+    stop: (float, float)
+        (x, y) ending grid point (optionally included in the grid)
+    endpoint: (bool, bool)
+        Optionally include the stop points in the grid.
+
+    Returns
+    -------
+    grid: xr.DataArray
+        A DataArray with coordinates linearly spaced over the desired interval
+
+    Notes
+    -----
+    Also computes image polar coordinates (r, theta).
+    """
+    num = (num, num) if np.isscalar(num) else num
+    x = np.linspace(start[0], stop[0], num[0], endpoint=endpoint[0])
+    y = np.linspace(start[1], stop[1], num[1], endpoint=endpoint[1])
+    grid = xr.DataArray(dims=['x', 'y'], coords={'x': x, 'y': y}).utils2d.update_polar_coords()
+    return grid
+
+@xr.register_dataset_accessor("utils2d")
+@xr.register_dataarray_accessor("utils2d")
+class utils2d(object):
+    def __init__(self, data_array):
+        self._obj = data_array
+
+    def update_polar_coords(self):
+        """
+        Add polar coordinates to x,y grid.
+        """
+        if not('x' in self._obj.coords and 'y' in self._obj.coords):
+            raise AttributeError('Coordinates have to contain both x and y')
+        x, y = self._obj['x'], self._obj['y']
+        xx, yy = np.meshgrid(x, y, indexing='xy')
+        r = np.sqrt(xx ** 2 + yy ** 2)
+        theta = np.arctan2(yy, xx)
+        return self._obj.assign_coords({'r': (['x', 'y'], r), 'theta': (['x', 'y'], theta)})
+
+    def cutoff(self, r0, fr0, dfr0, f0):
+        """
+        Smooth cutoff at radius r0 (continuous + once differentiable at r0).
+
+        Parameters
+        ----------
+        r0: float,
+            Cut-off radius
+        fr0: float,
+            Function value at r0: f(r0)
+        dfr0: float,
+            Function slope at r0: df(r0)
+        f0: float,
+            Function value at r=0: f(0)
+
+        References
+        ----------
+        https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L97
+        """
+        output = self._obj if 'r' in self._obj.coords else self._obj.utils2d.update_polar_coords()
+        r = output['r']
+        b = (2. * (fr0 - f0) - r0 * dfr0) / r0 ** 3
+        a = (fr0 - f0) / (b * r0 * r0) + r0
+        return b * r * r * (a - r) + f0
+
+    def w_keplerian(self, r_cutoff):
+        """
+        Compute Keplerian orbital frequency as a function of radius.
+
+        Parameters
+        ----------
+        r_cutoff: float
+            Cutoff radius for a smooth center point.
+
+        Returns
+        -------
+        w: xr.DataArray
+            A DataArray of Keplerian orbital frequency on an x,y grid.
+        """
+        if 'r' not in self._obj.coords:
+            self._obj.utils2d.update_polar_coords()
+        r = self._obj['r']
+        w = r ** (-1.5)
+        if r_cutoff > 0.0:
+            w.values[r < r_cutoff] = w.utils2d.cutoff(
+                r_cutoff, r_cutoff ** (-1.5), -1.5 * r_cutoff ** (-2.5), 0.9 * r_cutoff ** (-1.5)).values[r < r_cutoff]
+        w.name = 'w_keplerian'
+        w.attrs.update(r_cutoff=r_cutoff)
+        return w
+
+
+@xr.register_dataset_accessor("compute")
+class compute(object):
+    def __init__(self, dataset):
+        self._obj = dataset
+
+    def diffusion_coefficient(self, threshold=1e-8):
+        """
+        Compute diffusion coefficient:
+            2*correlation_length** 2 / correlation_time.clip(threshold).
+
+        Parameters
+        ----------
+        threshold: float
+            Minimal correlation time to avoid division by zero.
+
+        Returns
+        -------
+        diffusion_coefficient: xr.DataArray
+            A DataArray diffusion coefficients on an x,y grid.
+        """
+        if 'correlation_time' in self._obj and 'correlations_length' in self._obj:
+            return 2 * self._obj.correlation_length ** 2 / self._obj.correlation_time.clip(threshold)
+        else:
+            raise AttributeError('Dataset has to contain both correlations_length and correlation_time')
+
+    def v_magnitude(self):
+        """
+        Compute velocity field magnitude:
+           v_magnitude = sqrt(vx** 2 + vy**2).
+
+        Returns
+        -------
+        v_magnitude: xr.DataArray
+            A DataArray with velocity magnitude on an x,y grid.
+        """
+        if 'vx' in self._obj and 'vy' in self._obj:
+            return np.sqrt(self._obj.vx ** 2 + self._obj.vy ** 2)
+        else:
+            raise AttributeError('Dataset has to contain both vx and vy')
+
+    def v_angle(self):
+        """
+        Compute velocity field angle:
+           v_angle = arctan(vy/vx).
+
+        Returns
+        -------
+        v_angle: xr.DataArray
+            A DataArray with velocity angle on an x,y grid.
+        """
+        if 'vx' in self._obj and 'vy' in self._obj:
+            return np.arctan2(self._obj.vy, self._obj.vx)
+        else:
+            raise AttributeError('Dataset has to contain both vx and vy')
+
+
+    ###################
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
 
@@ -121,7 +278,7 @@ def opening_angles_vis_residuals(files, measurements, obs, envelope, interp_meth
                 del modes_fourier
             subspace = xr.concat(subspace, dim='deg')
 
-            output = pynoisy.algebra_utils.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
+            output = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
 
             if return_coefs:
                 res, coef = output
@@ -162,7 +319,7 @@ def opening_angles_grf_residuals(files, measurements, envelope=None, damp=1.0, d
             subspace = envelope * modes_reduced.eigenvectors if envelope is not None else modes_reduced.eigenvectors
             subspace *= modes_reduced.eigenvalues
             subspace = subspace.where(np.isfinite(measurements))
-            output = pynoisy.algebra_utils.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
+            output = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
             if return_coefs:
                 res, coef = output
                 coefs.append(coef.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
@@ -234,7 +391,7 @@ def krylov_residual(solver, measurements, degree, n_jobs=4, std_scaling=False):
 def krylov_projection(solver, measurements, degree, n_jobs=4, std_scaling=False):
     krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=std_scaling, n_jobs=n_jobs)
     k_matrix = krylov.data.reshape(degree, -1).T
-    projection = pynoisy.algebra_utils.least_squares_projection(measurements, k_matrix)
+    projection = pynoisy.linalg.least_squares_projection(measurements, k_matrix)
     return projection
 
 def krylov_error_fn(solver, measurements, degree, n_jobs=4, std_scaling=False):
@@ -270,12 +427,13 @@ def slider_select_file(dir, filetype=None):
 
 def get_grid(nx, ny):
     """TODO"""
-    x, y = noisy_core.get_xy_grid(nx, ny)
+    x = np.linspace(-0.5, 0.5, ny, endpoint=False)
+    y = np.linspace(-0.5, 0.5, nx, endpoint=False)
+    xx, yy = np.meshgrid(x, y, indexing='ij')
     grid = xr.Dataset(
-        coords={'x': x[:, 0], 'y': y[0],
-                'r': (['x', 'y'], np.sqrt(x ** 2 + y ** 2)),
-                'theta': (['x', 'y'], np.arctan2(y, x))
-                }
+        coords={'x': x, 'y': y,
+                'r': (['x', 'y'], np.sqrt(xx ** 2 + yy ** 2)),
+                'theta': (['x', 'y'], np.arctan2(yy, xx))}
     )
     return grid
 
