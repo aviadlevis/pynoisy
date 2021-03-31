@@ -126,12 +126,23 @@ class HGRFSolver(object):
                 output.append((sample, xr.load_dataset(self._output_file.name, group='data')))
 
         elif self.params.num_solvers > 1:
-            output = Parallel(n_jobs=self.params.num_solvers)(
-                delayed(self._parallel_run)(
+
+            def _parallel_run(cmd, source, sample, input_names, output_names, n_jobs):
+                file_id = np.mod(getpid(), n_jobs)
+                output_dir = os.path.dirname(output_names[file_id])
+                output_filename = os.path.relpath(output_names[file_id], output_dir)
+                cmd.extend(['-source', input_names[file_id], '-output', output_dir, '-filename', output_filename])
+                source.to_dataset(name='data_raw').to_netcdf(input_names[file_id], group='data', mode='w')
+                subprocess.run(cmd)
+                output = xr.load_dataset(output_names[file_id], group='data')
+                return (sample, output)
+
+            output = Parallel(n_jobs=int(self.params.num_solvers))(
+                delayed(_parallel_run)(
                     cmd, source.isel(sample=sample), sample,
                     input_names=[file.name for file in self._src_file],
                     output_names=[file.name for file in self._output_file],
-                    n_jobs=self.params.num_solvers)
+                    n_jobs=int(self.params.num_solvers))
                 for sample in range(source.sample.size)
             )
 
@@ -165,15 +176,6 @@ class HGRFSolver(object):
         return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
                        self.diffusion.correlation_length ** 2).clip(min=threshold)
 
-    def _parallel_run(cmd, source, sample, input_names, output_names, n_jobs):
-        file_id = np.mod(getpid(), n_jobs)
-        output_dir = os.path.dirname(output_names[file_id])
-        output_filename = os.path.relpath(output_names[file_id], output_dir)
-        cmd.extend(['-source', input_names[file_id], '-output', output_dir, '-filename', output_filename])
-        source.to_dataset(name='data_raw').to_netcdf(input_names[file_id], group='data', mode='w')
-        subprocess.run(cmd)
-        output = xr.load_dataset(output_names[file_id], group='data')
-        return (sample, output)
 
     def _parallel_processing_cmd(self, nt, n_jobs, nprocx, nprocy, nproct):
         """
