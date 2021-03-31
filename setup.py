@@ -1,7 +1,5 @@
 import setuptools
 from numpy.distutils.core import setup
-from distutils.extension import Extension
-from Cython.Build import cythonize
 import numpy
 import subprocess
 import sys
@@ -21,19 +19,6 @@ if 'cleanall' in args:
 if 'install' in args or 'develop' in args:
     subprocess.Popen(["make matrices"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
 
-extensions = [
-    Extension(
-        'noisy_core',
-        sources=['src/noisy.pyx'],
-        libraries=['gsl', 'blas'],
-    ),
-    Extension(
-        'hgrf_core',
-        sources=['src/hgrf.pyx'],
-        libraries=['gsl', 'blas'],
-    ),
-]
-
 setup(
     name='pynoisy',
     version='1.5',
@@ -46,8 +31,7 @@ setup(
                       "pandas",
                       "xarray",
                       "tensorboardX",
-                      "future"],
-    ext_modules=cythonize(extensions)
+                      "future"]
 )
 
 

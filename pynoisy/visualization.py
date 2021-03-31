@@ -59,6 +59,7 @@ def slider_frame_comparison(frames1, frames2, scale='amp'):
             cbar.mappable.set_clim([img.min(), img.max()])
 
     num_frames = min(frames1.t.size, frames2.t.size)
+    plt.tight_layout()
     interact(imshow_frame, frame=(0, num_frames-1));
 
 def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdBu_r', add_ticks=False,
