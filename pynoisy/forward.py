@@ -109,7 +109,9 @@ class HGRFSolver(object):
             cmd.append('-timer')
 
         if std_scaling:
+            attrs = source.attrs
             source = source * self.std_scaling_factor(nrecur)
+            source.attrs.update(attrs)
 
         # Parallel processing
         if self.params.num_solvers == 1:
@@ -134,7 +136,8 @@ class HGRFSolver(object):
 
         dims = ['t', 'x', 'y']
         coords = {'t': np.linspace(0, evolution_length, nt), 'x': self.x, 'y': self.y}
-        attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type, 'std_scaling': str(std_scaling)}
+        attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': str(self.solver_type.data),
+                 'std_scaling': str(std_scaling)}
         attrs.update(source.attrs)
 
         for sample, pixels in output:

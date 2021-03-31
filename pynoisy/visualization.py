@@ -407,7 +407,8 @@ class VisualizationAccessor(object):
     def __init__(self, data_array):
         self._obj = data_array
 
-    def major_axis(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None, scale=None):
+    def major_axis(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None, scale=None,
+                   fontsize=12):
         """
         Quiver plot of spatial correlation major axis.
 
@@ -432,10 +433,12 @@ class VisualizationAccessor(object):
             If *None*, a simple autoscaling algorithm is used, based on the average
             vector length and the number of vectors. The arrow length unit is given by
             the *scale_units* parameter.
+        fontsize: float, default=12,
+            Title fontsize
         """
         if not 'spatial_angle' in self._obj:
             raise AttributeError('Dataset doesnt have spatial_angle DataArray')
-        spatial_angle = self._obs.spatial_angle
+        spatial_angle = self._obj.spatial_angle
         if not ('x' in spatial_angle.coords and 'y' in spatial_angle.coords):
             raise AttributeError('spatial_angle doesnt have both x and y coordinates')
 
@@ -446,9 +449,11 @@ class VisualizationAccessor(object):
         y, x = np.meshgrid(angle.x, angle.y, indexing='xy')
         ax.quiver(x, y, np.sin(angle), np.cos(angle), headaxislength=0, headlength=0, color=color,
                   alpha=alpha, width=width, scale=scale)
-        ax.set_title('Spatial correlation major axis')
+        ax.set_title('Spatial correlation major axis', fontsize=fontsize)
+        ax.set_aspect('equal')
 
-    def minor_axis(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None, scale=None):
+    def minor_axis(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None, scale=None,
+                   fontsize=12):
         """
         Quiver plot of spatial correlation minor axis.
 
@@ -473,10 +478,12 @@ class VisualizationAccessor(object):
             If *None*, a simple autoscaling algorithm is used, based on the average
             vector length and the number of vectors. The arrow length unit is given by
             the *scale_units* parameter.
+        fontsize: float, default=12,
+            Title fontsize
         """
         if not 'spatial_angle' in self._obj:
             raise AttributeError('Dataset doesnt have spatial_angle DataArray')
-        spatial_angle = self._obs.spatial_angle
+        spatial_angle = self._obj.spatial_angle
         if not ('x' in spatial_angle.coords and 'y' in spatial_angle.coords):
             raise AttributeError('spatial_angle doesnt have both x and y coordinates')
 
@@ -487,9 +494,11 @@ class VisualizationAccessor(object):
         y, x = np.meshgrid(angle.x, angle.y, indexing='xy')
         ax.quiver(x, y, np.cos(angle), -np.sin(angle), headaxislength=0, headlength=0, color=color, alpha=alpha,
                    width=width, scale=scale)
-        ax.set_title('Spatial correlation minor axis')
+        ax.set_title('Spatial correlation minor axis', fontsize=fontsize)
+        ax.set_aspect('equal')
 
-    def velocity_quiver(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None, scale=None):
+    def velocity_quiver(self, ax=None, figsize=(5,4), downscale_factor=8, color='black', alpha=1.0, width=None,
+                        scale=None, fontsize=12):
         """
         Quiver plot of velocity field.
 
@@ -514,6 +523,8 @@ class VisualizationAccessor(object):
             If *None*, a simple autoscaling algorithm is used, based on the average
             vector length and the number of vectors. The arrow length unit is given by
             the *scale_units* parameter.
+        fontsize: float, default=12,
+            Title fontsize
         """
         if not ('vx' in self._obj and 'vy' in self._obj):
             raise AttributeError('Dataset doesnt have both vx and vy')
@@ -524,4 +535,5 @@ class VisualizationAccessor(object):
         v = self._obj.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
         y, x = np.meshgrid(v.x, v.y, indexing='xy')
         ax.quiver(x, y, v.vx, v.vy, color=color, width=width, scale=scale, alpha=alpha)
-        ax.set_title('Velocity field')
+        ax.set_title('Velocity field', fontsize=fontsize)
+        ax.set_aspect('equal')
