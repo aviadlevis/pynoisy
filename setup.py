@@ -10,6 +10,8 @@ if 'cleanall' in args:
     subprocess.Popen("rm -rf build", shell=True, executable="/bin/bash")
     subprocess.Popen("rm -rf *.c", shell=True, executable="/bin/bash")
     subprocess.Popen("rm -rf *.so", shell=True, executable="/bin/bash")
+    subprocess.Popen("rm -rf dist", shell=True, executable="/bin/bash")
+    subprocess.Popen(["make clean"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
     subprocess.Popen(["make distclean"], shell=True, stdout=subprocess.PIPE, cwd="./inoisy")
 
     # Now do a normal clean

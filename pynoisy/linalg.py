@@ -5,13 +5,29 @@ from tqdm.auto import tqdm
 from scipy.sparse.linalg import lsqr
 
 
-def xarray_to_basis(array):
-    degree = 1
-    if 'deg' in array.dims:
-        degree = array.deg.size
-    elif 'sample' in array.dims:
-        degree = array.sample.size
-    return array.data.reshape(degree, -1).T
+@xr.register_dataarray_accessor("linalg")
+class LinearAlgebraAccessor(object):
+    """
+    Register a custom accessor LinearAlgebraAccessor on xarray.DataArray object.
+    This adds methods for linear algebra computations.
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def to_basis(self, vector_dim):
+        """
+        Return a subspace basis from DataArray vectors.
+
+        Parameters
+        ----------
+        vector_dim: string,
+            The dimension of the vector subspace. Has to be a dimension of the DataArray.
+        """
+        if vector_dim not in self._obj.dims:
+            raise AttributeError('{} is not a dimension of the DataArray (dims={})'.format(vector_dim, self._obj.dims))
+        basis = self._obj.data.reshape(self._obj[vector_dim].size, -1).T
+        return basis
+
 
 def basis_to_xarray(basis, coords, name=None):
     if np.all([dim in coords.dims for dim in ('x', 'y')]):
