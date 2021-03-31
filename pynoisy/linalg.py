@@ -96,7 +96,7 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     Parameters
     ----------
     nt: int,
-        Number of temporal frames.
+        Number of temporal frames (should be a power of 2).
     solver: pynoisy.forward.HGRFSolver,
         A Solver object which symbolically preforms matrix multiplication by solving the underlying SPDE
         See pynoisy/forward.py for more information.
@@ -114,9 +114,6 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     modes: xr.Dataset
         A Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'.
 
-    Notes
-    -----
-    nt should be a power of 2.
 
     References
     ----------
