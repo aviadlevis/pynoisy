@@ -46,6 +46,10 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(False, False
 @xr.register_dataset_accessor("polar")
 @xr.register_dataarray_accessor("polar")
 class PolarAccessor(object):
+    """
+    Register a custom accessor PolarAccessor on xarray.DataArray and xarray.Dataset objects.
+    This adds methods for polar coordinate processing on a 2D (x,y) grid.
+    """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
@@ -113,6 +117,10 @@ class PolarAccessor(object):
 
 @xr.register_dataset_accessor("tensor")
 class TensorAccessor(object):
+    """
+    Register a custom accessor TensorAccessor on xarray.Dataset object.
+    This adds methods for processing the diffusion tensor fields.
+    """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 

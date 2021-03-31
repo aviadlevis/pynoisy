@@ -140,7 +140,11 @@ def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdB
     return anim
 
 @xr.register_dataarray_accessor("visualization")
-class visualization(object):
+class VisualizationAccessor(object):
+    """
+    Register a custom accessor VisualizationAccessor on xarray.DataArray object.
+    This adds methods for visualization of Gaussian Random Fields (3D DataArrays) along a single axis.
+    """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
@@ -257,6 +261,10 @@ class visualization(object):
 
 @xr.register_dataarray_accessor("loss")
 class LossAccessor(object):
+    """
+    Register a custom accessor LossAccessor on xarray.DataArray object.
+    This adds methods for processing and visualization of loss manifolds.
+    """
     def __init__(self, data_array):
         self._obj = data_array
 
@@ -392,6 +400,10 @@ class LossAccessor(object):
 
 @xr.register_dataset_accessor("visualization")
 class VisualizationAccessor(object):
+    """
+    Register a custom accessor VisualizationAccessor on xarray.Dataset object.
+    This adds methods for visualization of diffusion tensor elements.
+    """
     def __init__(self, data_array):
         self._obj = data_array
 
