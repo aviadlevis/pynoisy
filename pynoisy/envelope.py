@@ -1,29 +1,33 @@
 """
 TODO: Some documentation and general description goes here.
 """
+import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
-import numpy as np
 
-
-def grid(data):
-    _grid = utils.get_grid(*data.shape)
-    envelope = xr.DataArray(
-        name='envelope',
-        data=np.array(data, dtype=np.float64, order='C'),
-        coords=_grid.coords,
-        dims=_grid.dims,
-        attrs={'envelope_model': 'grid'}
-    )
-    return envelope
-
-
-def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
-         photon_ring_decay=100.0, ascent=1.0, inner_decay=5.0, outer_decay=10, total_flux=2.0):
+def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
+         photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=2.0):
     """
-    TODO
+    Ring envelope with a brighter photon ring in the inner-most orbit.
+
+    Parameters
+    ----------
+    nx: int,
+        Number of x-axis grid points.
+    ny: int,
+        Number of y-axis grid points.
+    fov: float, default=1.0,
+        Field of view. Default is unitless 1.0.
+    inner_radius: float, default=0.2,
+        inner radius of the black-hole shadow.
+    outer_radius: float, default=1.0,
+        Cutoff outer radius for the exponential decay of flux. Beyond this radius the flux it cutoff to zero.
+    photon_ring_thickness: float, default=0.05,
+        Thickness of the inner bright photon ring.
+
     """
-    r = utils.get_grid(nx, ny).r.data
+    grid = utils.linspace_2d((nx, ny), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
+    r = grid.r.data
 
     zone0_radius = inner_radius
     zone1_radius = inner_radius + photon_ring_thickness
@@ -55,39 +59,25 @@ def ring(nx, ny, inner_radius=0.2, outer_radius=1.0, photon_ring_thickness=0.05,
         zone3[r <= outer_radius] = 0
         data += zone3
 
-    envelope = grid(data)
+    envelope = xr.DataArray(
+        name='envelope',
+        data=np.array(data, dtype=np.float64, order='C'),
+        coords=grid.coords,
+        attrs={
+            'envelope_model': 'ring',
+            'fov': fov,
+            'inner_radius': inner_radius,
+            'outer_radius': outer_radius,
+            'photon_ring_thickness': photon_ring_thickness,
+            'photon_ring_contrast': photon_ring_contrast,
+            'photon_ring_decay': photon_ring_decay,
+            'ascent': ascent,
+            'inner_decay': inner_decay,
+            'outer_decay': outer_decay,
+            'total_flux': total_flux
+        } )
+
     envelope *= (total_flux / envelope.sum())
-    new_attrs = {
-        'envelope_model': 'disk',
-        'inner_radius': inner_radius,
-        'outer_radius': outer_radius,
-        'photon_ring_thickness': photon_ring_thickness,
-        'photon_ring_contrast': photon_ring_contrast,
-        'photon_ring_decay': photon_ring_decay,
-        'ascent': ascent,
-        'inner_decay': inner_decay,
-        'outer_decay': outer_decay
-    }
-    envelope.attrs.update(new_attrs)
-    return envelope
-
-
-def noisy_ring(nx, ny, scaling_radius=0.2):
-    """
-    The envelope function multiplies the random fields to create synthetic images.
-    The disk envelope function is a specific envelope defined by the src/model_disk.c
-
-    Parameters
-    ----------
-    scaling_radius: float, default=0.02
-        Scales the disk radius with respect to the whole image
-    """
-    envelope = grid(noisy_core.get_disk_envelope(nx, ny, scaling_radius))
-    new_attrs = {
-        'envelope_model': 'noisy_ring',
-        'scaling_radius': scaling_radius
-    }
-    envelope.attrs.update(new_attrs)
     return envelope
 
 
@@ -130,6 +120,7 @@ def disk(nx, ny, radius=0.2, decay=20):
     envelope.attrs.update(new_attrs)
     return envelope
 
+
 def general_xy(nx, ny, scaling_radius=0.1):
     radius = utils.get_grid(nx, ny).r
     ir = scaling_radius / radius
@@ -141,6 +132,7 @@ def general_xy(nx, ny, scaling_radius=0.1):
     }
     envelope.attrs.update(new_attrs)
     return envelope
+
 
 def azimuth_symetric(coords, envelope_r):
     """

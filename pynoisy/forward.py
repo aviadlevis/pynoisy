@@ -243,7 +243,7 @@ class HGRFSolver(object):
             warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
 
         # Save parameters to file (loaded within HYPRE)
-        self.save(self._param_file.name)
+        self.to_netcdf(self._param_file.name)
         n_jobs, proccesing_cmd = self._parallel_processing_cmd(nt, n_jobs, nprocx, nprocy, nproct)
         cmd = ['mpiexec', '-n', str(n_jobs), str(self.params.executable.data), '-seed', str(seed),  '-tol', str(tol),
                '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),

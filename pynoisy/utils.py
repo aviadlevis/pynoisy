@@ -10,7 +10,7 @@ import os
 from tqdm.auto import tqdm
 import gc
 
-def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(False, False)):
+def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True)):
     """
     Return a 2D DataArray with coordinates spaced over a specified interval.
 
@@ -59,6 +59,57 @@ def full_like(coords, fill_value):
     """
     array = xr.DataArray(coords=coords).fillna(fill_value)
     return array
+
+@xr.register_dataset_accessor("image")
+@xr.register_dataarray_accessor("image")
+class ImageAccessor(object):
+    """
+    Register a custom accessor ImageAccessor on xarray.DataArray and xarray.Dataset objects.
+    This adds methods for 2D manipulation of data and coordinates.
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def set_fov(self, fov, image_dims=['x', 'y']):
+        """
+        Change the field of view of the underlying image data.
+
+        Parameters
+        ----------
+        fov: float
+            Field of view.
+        image_dims: [dim1, dim2], default=['x', 'y'],
+            Image data dimensions.
+
+        Returns
+        -------
+        data: xr.DataArray or xr.Dataset
+            A DataArray or Dataset with the underlying 2D coordinates updated.
+        """
+        data = self._obj
+        grid = linspace_2d((data[image_dims[0]].size, data[image_dims[1]].size),
+                           (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0),
+                           endpoint=(True, True))
+        data = data.assign_coords({image_dims[0]: grid[image_dims[0]], image_dims[1]: grid[image_dims[1]]})
+        data.attrs.update(fov=fov)
+        return data
+
+    def get_fov(self, dim='x'):
+        """
+        Get the field of view from the underlying image data Coordinates.
+
+        Parameters
+        ----------
+        dim: str, default='x',
+            Image data dimension.
+
+        Returns
+        -------
+        fov: float
+            The field of view of the underlying DataArray
+        """
+        fov = self._obj[dim][-1] - self._obj[dim][0]
+        return fov
 
 @xr.register_dataset_accessor("polar")
 @xr.register_dataarray_accessor("polar")
