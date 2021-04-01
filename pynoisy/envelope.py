@@ -1,14 +1,15 @@
 """
-TODO: Some documentation and general description goes here.
+Envelopes are static images which capture stationary features of the movie (e.g. black hole shadow).
+Simple geometric image structures are used to model the static envelope (e.g. ring, gaussian, disk etc..)
 """
 import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
 
 def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
-         photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=2.0):
+         photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=1.0):
     """
-    Ring envelope with a brighter photon ring in the inner-most orbit.
+    Ring envelope with a brighter photon ring in the inner-most orbit [1].
 
     Parameters
     ----------
@@ -24,7 +25,29 @@ def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
         Cutoff outer radius for the exponential decay of flux. Beyond this radius the flux it cutoff to zero.
     photon_ring_thickness: float, default=0.05,
         Thickness of the inner bright photon ring.
+    photon_ring_contrast: float, default=0.95,
+        Brightness of the inner photon ring.
+    photon_ring_decay: float, default=100.0,
+        Exponential decay rate of the photon ring
+    ascent: float, 1.0,
+        Decay rate of the black-hole shadow region.
+    inner_decay: float, default=8.0,
+        Exponential decay rate of the inner ring.
+    outer_decay: float, default=10.0,
+        Exponential decay rate of the outer ring.
+    total_flux: float, default=1.0,
+        Total flux normalization of the image (sum over pixels).
 
+    Returns
+    -------
+    envelope: xr.DataArray,
+        An image DataArray with dimensions ['x', 'y'].
+
+    References
+    ----------
+    .. [1] Narayan, R., Johnson, M.D. and Gammie, C.F., The shadow of a spherically accreting black hole.
+           The Astrophysical Journal Letters, 885(2), p.L33. 2019.
+           url: https://iopscience.iop.org/article/10.3847/2041-8213/ab518c/pdf
     """
     grid = utils.linspace_2d((nx, ny), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
     r = grid.r.data
@@ -75,69 +98,98 @@ def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
             'inner_decay': inner_decay,
             'outer_decay': outer_decay,
             'total_flux': total_flux
-        } )
+        })
 
     envelope *= (total_flux / envelope.sum())
     return envelope
 
+def gaussian(nx, ny, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
+    """
+    Gaussian envelope.
 
-def gaussian(std=0.2, fwhm=None):
-    """TODO"""
+    Parameters
+    ----------
+    nx: int,
+        Number of x-axis grid points.
+    ny: int,
+        Number of y-axis grid points.
+    fov: float, default=1.0,
+        Field of view. Default is unitless 1.0.
+    std: float, default=0.2, optional,
+        Gaussian standard deviation. Used if fwhm is not specified.
+    fwhm: float, optional,
+        Gaussian full width half max. Overrides the std parameter.
+    total_flux: float, default=1.0,
+        Total flux normalization of the image (sum over pixels).
+
+    Returns
+    -------
+    envelope: xr.DataArray,
+        An image DataArray with dimensions ['x', 'y'].
+    """
     if fwhm is None:
         fwhm = std * np.sqrt(2 * np.log(2)) * 2 / np.sqrt(2)
     else:
         std = fwhm * np.sqrt(2) / (np.sqrt(2 * np.log(2)) * 2)
 
-    r = utils.get_grid().r
+    grid = utils.linspace_2d((nx, ny), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    r = grid.r.data
     data = np.exp(-(r / std) ** 2)
 
-    envelope = grid(data)
-    new_attrs = {
-        'envelope_model': 'gaussian',
-        'std': std,
-        'fwhm': fwhm
-    }
-    envelope.attrs.update(new_attrs)
+    envelope = xr.DataArray(
+        name='envelope',
+        data=np.array(data, dtype=np.float64, order='C'),
+        coords=grid.coords,
+        attrs={
+            'envelope_model': 'gaussian',
+            'fov': fov,
+            'std': std,
+            'fwhm': fwhm,
+            'total_flux': total_flux
+        })
+    envelope *= (total_flux / envelope.sum())
     return envelope
 
-
-def disk(nx, ny, radius=0.2, decay=20):
+def disk(nx, ny, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     """
-    TODO
+    Disk envelope.
+
+    Parameters
+    ----------
+    nx: int,
+        Number of x-axis grid points.
+    ny: int,
+        Number of y-axis grid points.
+    fov: float, default=1.0,
+        Field of view. Default is unitless 1.0.
+    radius: float, default=0.2, optional,
+        Disk radius.
+    decay: float, default=20.
+        Exponential decay rate of flux close to the disk edge (at 95% of the disk radius).
+    total_flux: float, default=1.0,
+        Total flux normalization of the image (sum over pixels).
+
+    Returns
+    -------
+    envelope: xr.DataArray,
+        An image DataArray with dimensions ['x', 'y'].
     """
-    r = utils.get_grid(nx, ny).r
-    data = np.ones_like(r)
-    data[r >= .95 * radius] = 0
-    exponential_decay = np.exp(-decay * (r - .95 * radius))
-    data += exponential_decay.where(r >= .95 * radius).fillna(0.0)
+    grid = utils.linspace_2d((nx, ny), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    data = utils.full_like(grid.coords, fill_value=1.0)
+    data.values[data.r >= .95 * radius] = 0
+    exponential_decay = np.exp(-decay * (data.r - .95 * radius))
+    data += exponential_decay.where(data.r >= .95 * radius).fillna(0.0)
 
-    envelope = grid(data)
-    new_attrs = {
-        'envelope_model': 'disk',
-        'radius': radius,
-        'exponential_decay': decay
-    }
-    envelope.attrs.update(new_attrs)
-    return envelope
-
-
-def general_xy(nx, ny, scaling_radius=0.1):
-    radius = utils.get_grid(nx, ny).r
-    ir = scaling_radius / radius
-    small = 1e-10
-    envelope = (ir ** 4 * np.exp(-ir ** 2)).where(radius > scaling_radius / np.sqrt(np.log(1.0 / small))).fillna(0.0)
-    new_attrs = {
-        'envelope_model': 'general_xy',
-        'scaling_radius': scaling_radius
-    }
-    envelope.attrs.update(new_attrs)
-    return envelope
-
-
-def azimuth_symetric(coords, envelope_r):
-    """
-    TODO
-    """
-    envelope = envelope_r.interp(r=coords['r'])
-    envelope.attrs.update(envelope_model='azimuth_symetric')
+    envelope = xr.DataArray(
+        name='envelope',
+        data=np.array(data, dtype=np.float64, order='C'),
+        coords=grid.coords,
+        attrs={
+            'envelope_model': 'disk',
+            'fov': fov,
+            'radius': radius,
+            'decay': decay,
+            'total_flux': total_flux
+        })
+    envelope *= (total_flux / envelope.sum())
     return envelope
