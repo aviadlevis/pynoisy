@@ -22,9 +22,9 @@ def general_xy(ny, nx, opening_angle=-np.pi/2, r_cutoff=0.5, grid_start=(-10, -1
         Number of x-axis grid points.
     ny: int,
         Number of y-axis grid points.
-    opening_angle: float, default=-pi/2 (counter-clockwise rotation)
+    opening_angle: float, default=-pi/2 (clockwise rotation)
         This angle defines the opening angle with respect to the local radius.
-        A negative angle rotates the velocity vector axis counter-clockwise.
+        A negative angle rotates the velocity vector axis clockwise.
     r_cutoff: float
         Cutoff radius for a smooth center point.
 

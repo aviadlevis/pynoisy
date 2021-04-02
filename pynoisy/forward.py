@@ -317,7 +317,7 @@ class HGRFSolver(object):
         if (output.sample.size == 1):
             output = output.squeeze('sample').drop_vars('sample')
 
-        return output
+        return output.transpose(...,'t','y','x')
 
     def std_scaling_factor(self, nrecur=1, threshold=1e-10):
         """

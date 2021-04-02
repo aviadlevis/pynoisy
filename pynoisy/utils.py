@@ -60,6 +60,33 @@ def full_like(coords, fill_value):
     array = xr.DataArray(coords=coords).fillna(fill_value)
     return array
 
+
+def load_grmhd(filepath):
+    """
+    Load GRMHD movie frames (.h5 file)
+
+    Parameters
+    ----------
+    filepath: str
+        path to .h5 file
+
+    Returns
+    -------
+    movie: xr.DataArray
+        GRMHD movie as an xarray object with dims=['t', 'x', 'y']
+    """
+    filename =  os.path.abspath(filepath).split('/')[-1][:-3]
+    with h5py.File(filepath, 'r') as file:
+        frames = file['I'][:]
+    nt, nx, ny = frames.shape
+    movie = xr.DataArray(data=frames,
+                         coords={'t': np.linspace(0, 1, nt),
+                                 'x': np.linspace(-0.5, 0.5, nx),
+                                 'y': np.linspace(-0.5, 0.5, ny)},
+                         dims=['t', 'x', 'y'],
+                         attrs={'GRMHD': filename})
+    return movie
+
 @xr.register_dataset_accessor("image")
 @xr.register_dataarray_accessor("image")
 class ImageAccessor(object):
@@ -499,30 +526,6 @@ def slider_select_file(dir, filetype=None):
     display(file)
     return file
 
-def load_grmhd(filepath):
-    """
-    Load an .h5 GRMHD movie frames
-
-    Parameters
-    ----------
-    filepath: str
-        path to .h5 file
-
-    Returns
-    -------
-    measurements: xr.DataArray(dims=['t', 'x', 'y'])
-        GRMHD measurements as an xarray object.
-    """
-    filename =  os.path.abspath(filepath).split('/')[-1][:-3]
-    with h5py.File(filepath, 'r') as file:
-        frames = file['I'][:]
-    nt_, nx_, ny_ = frames.shape
-    grid = get_grid(nx_, ny_)
-    measurements = xr.DataArray(data=frames,
-                                coords={'x': grid.x,  'y': grid.y, 't': np.linspace(0, 0.1, nt_)},
-                                dims=['t', 'x', 'y'],
-                                attrs={'GRMHD': filename})
-    return measurements
 
 def grmhd_preprocessing(movie, flux_threshold=1e-10):
     import warnings

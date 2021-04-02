@@ -13,7 +13,7 @@ import numpy as np
 import xarray as xr
 import pynoisy.utils
 
-def general_xy(ny, nx, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
+def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
                grid_start=(-10, -10), grid_end=(10, 10)):
     """
     Diffusion fields defined by the general_xy model [1].
@@ -24,9 +24,10 @@ def general_xy(ny, nx, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, te
         Number of x-axis grid points.
     ny: int,
         Number of y-axis grid points.
-    opening_angle: float, default= np.pi/2 - np.pi/9
+    opening_angle: float, default = np.pi/2 - np.pi/9
         This angle defines the opening angle of spirals with respect to the local radius.
-        A positive angle rotates the correlation axes clockwise
+        A positive angle rotates the correlation to match clockwise rotation trailing spiral arms.
+        (this means counter clockwise rotation of the local correlation axes)
     tau: float, default=1.0
         Product of correlation time and local Keplerian frequency.
     lam: float, default=5.0
@@ -153,9 +154,10 @@ def general_xy_spatial_angle(theta, opening_angle=np.pi/2 - np.pi/9):
     ----------
     theta: xr.DataArray
         A DataArray with the azimuthal coordinates on a 2D grid.
-    opening_angle: float, default= np.pi/2 - np.pi/9
-        This angle defines the opening angle of spirals with respect to the local radius
-
+    opening_angle: float, default = np.pi/2 - np.pi/9
+        This angle defines the opening angle of spirals with respect to the local radius.
+        A positive angle rotates the correlation to match clockwise rotation trailing spiral arms.
+        (this means counter clockwise rotation of the local correlation axes)
     Returns
     -------
     spatial_angle: xr.DataArray
