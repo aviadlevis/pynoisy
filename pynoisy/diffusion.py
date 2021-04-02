@@ -13,7 +13,7 @@ import numpy as np
 import xarray as xr
 import pynoisy.utils
 
-def general_xy(nx, ny, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
+def general_xy(ny, nx, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
                grid_start=(-10, -10), grid_end=(10, 10)):
     """
     Diffusion fields defined by the general_xy model [1].
@@ -25,7 +25,8 @@ def general_xy(nx, ny, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, te
     ny: int,
         Number of y-axis grid points.
     opening_angle: float, default= np.pi/2 - np.pi/9
-        This angle defines the opening angle of spirals with respect to the local radius
+        This angle defines the opening angle of spirals with respect to the local radius.
+        A positive angle rotates the correlation axes clockwise
     tau: float, default=1.0
         Product of correlation time and local Keplerian frequency.
     lam: float, default=5.0
@@ -52,16 +53,16 @@ def general_xy(nx, ny, opening_angle=np.pi / 2 - np.pi / 9, tau=1.0, lam=5.0, te
     ----------
     .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
-    grid = pynoisy.utils.linspace_2d((nx, ny), grid_start, grid_end)
+    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end)
     correlation_time = general_xy_correlation_time(grid.r, tau, r_cutoff)
     correlation_length = general_xy_correlation_length(grid.r, lam, r_cutoff)
     spatial_angle = general_xy_spatial_angle(grid.theta, opening_angle)
 
     diffusion = xr.Dataset(
         data_vars={
-            'spatial_angle': (grid.dims, spatial_angle),
-            'correlation_time': (grid.dims, correlation_time),
-            'correlation_length': (grid.dims, correlation_length),
+            'spatial_angle': (['y', 'x'], spatial_angle),
+            'correlation_time': (['y', 'x'], correlation_time),
+            'correlation_length': (['y', 'x'], correlation_length),
             'tensor_ratio': tensor_ratio
         },
         coords=grid.coords,
@@ -143,7 +144,7 @@ def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
     return correlation_time
 
 
-def general_xy_spatial_angle(theta, opening_angle=np.pi / 2 - np.pi / 9):
+def general_xy_spatial_angle(theta, opening_angle=np.pi/2 - np.pi/9):
     """
     Compute angle of spatial correlation on a grid according to general_xy.
     Source: inoisy/src/param_general_xy.c

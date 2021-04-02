@@ -295,7 +295,7 @@ class HGRFSolver(object):
             )
 
         dims = ['t', 'x', 'y']
-        coords = {'t': np.linspace(0, evolution_length, nt), 'x': self.x, 'y': self.y}
+        coords = {'t': np.linspace(0, evolution_length, nt), 'y': self.y, 'x': self.x}
         attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type,
                  'std_scaling': str(std_scaling)}
         attrs.update(source.attrs)
@@ -374,8 +374,8 @@ class HGRFSolver(object):
             warnings.warn('n_jobs is overwritten by {}: n_jobs != nprocx*nprocy*nproct.'.format(n_jobs))
 
         cmd = [
-            '-ni', str(int(self.nx / nprocx)), '-nj', str(int(self.ny / nprocy)), '-nk', str(int(nt / nproct)),
-            '-pgrid', str(int(nprocx)), str(int(nprocy)), str(int(nproct))
+            '-ni', str(int(self.ny / nprocy)), '-nj', str(int(self.nx / nprocx)), '-nk', str(int(nt / nproct)),
+            '-pgrid', str(int(nprocy)), str(int(nprocx)), str(int(nproct))
         ]
         return n_jobs, cmd
 

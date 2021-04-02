@@ -36,9 +36,9 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True))
     Also computes image polar coordinates (r, theta).
     """
     num = (num, num) if np.isscalar(num) else num
-    x = np.linspace(start[0], stop[0], num[0], endpoint=endpoint[0])
-    y = np.linspace(start[1], stop[1], num[1], endpoint=endpoint[1])
-    grid = xr.Dataset(coords={'x': x, 'y': y}).polar.add_coords()
+    y = np.linspace(start[0], stop[0], num[0], endpoint=endpoint[0])
+    x = np.linspace(start[1], stop[1], num[1], endpoint=endpoint[1])
+    grid = xr.Dataset(coords={'y': y, 'x': x}).polar.add_coords()
     return grid
 
 def full_like(coords, fill_value):
@@ -128,10 +128,10 @@ class PolarAccessor(object):
         if not('x' in self._obj.coords and 'y' in self._obj.coords):
             raise AttributeError('Coordinates have to contain both x and y')
         x, y = self._obj['x'], self._obj['y']
-        xx, yy = np.meshgrid(x, y, indexing='xy')
+        yy, xx = np.meshgrid(y, x, indexing='ij')
         r = np.sqrt(xx ** 2 + yy ** 2)
         theta = np.arctan2(yy, xx)
-        return self._obj.assign_coords({'r': (['x', 'y'], r), 'theta': (['x', 'y'], theta)})
+        return self._obj.assign_coords({'r': (['y', 'x'], r), 'theta': (['y', 'x'], theta)})
 
     def r_cutoff(self, r0, fr0, dfr0, f0):
         """
@@ -187,11 +187,12 @@ class PolarAccessor(object):
 class TensorAccessor(object):
     """
     Register a custom accessor TensorAccessor on xarray.Dataset object.
-    This adds methods for processing the diffusion tensor fields.
+    This adds properties and methods for processing the diffusion tensor fields.
     """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+    @property
     def diffusion_coefficient(self, threshold=1e-8):
         """
         Compute diffusion coefficient:
@@ -212,6 +213,7 @@ class TensorAccessor(object):
         else:
             raise AttributeError('Dataset has to contain both correlations_length and correlation_time')
 
+    @property
     def v_magnitude(self):
         """
         Compute velocity field magnitude:
@@ -227,6 +229,7 @@ class TensorAccessor(object):
         else:
             raise AttributeError('Dataset has to contain both vx and vy')
 
+    @property
     def v_angle(self):
         """
         Compute velocity field angle:

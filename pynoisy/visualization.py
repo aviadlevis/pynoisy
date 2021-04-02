@@ -446,8 +446,8 @@ class VisualizationAccessor(object):
             fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         angle = spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        y, x = np.meshgrid(angle.x, angle.y, indexing='xy')
-        ax.quiver(x, y, np.sin(angle), np.cos(angle), headaxislength=0, headlength=0, color=color,
+        yy, xx = np.meshgrid(angle.x, angle.y, indexing='xy')
+        ax.quiver(xx, yy, np.sin(angle), np.cos(angle), headaxislength=0, headlength=0, color=color,
                   alpha=alpha, width=width, scale=scale)
         ax.set_title('Spatial correlation major axis', fontsize=fontsize)
         ax.set_aspect('equal')
@@ -491,8 +491,8 @@ class VisualizationAccessor(object):
             fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         angle = spatial_angle.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        y, x = np.meshgrid(angle.x, angle.y, indexing='xy')
-        ax.quiver(x, y, np.cos(angle), -np.sin(angle), headaxislength=0, headlength=0, color=color, alpha=alpha,
+        yy, xx = np.meshgrid(angle.x, angle.y, indexing='xy')
+        ax.quiver(xx, yy, np.cos(angle), -np.sin(angle), headaxislength=0, headlength=0, color=color, alpha=alpha,
                    width=width, scale=scale)
         ax.set_title('Spatial correlation minor axis', fontsize=fontsize)
         ax.set_aspect('equal')
@@ -533,7 +533,7 @@ class VisualizationAccessor(object):
             fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         v = self._obj.coarsen(x=downscale_factor, y=downscale_factor, boundary='trim').mean()
-        y, x = np.meshgrid(v.x, v.y, indexing='xy')
-        ax.quiver(x, y, v.vx, v.vy, color=color, width=width, scale=scale, alpha=alpha)
+        yy, xx = np.meshgrid(v.x, v.y, indexing='xy')
+        ax.quiver(xx, yy, v.vy, v.vx, color=color, width=width, scale=scale, alpha=alpha)
         ax.set_title('Velocity field', fontsize=fontsize)
         ax.set_aspect('equal')
