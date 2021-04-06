@@ -64,6 +64,8 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
         See pynoisy/forward.py for more information.
     input_vectors: xr.DataArray,
         A DataArray with the input vectors along dimension 'sample'.
+    test_vectors: xr.DataArray,
+        A DataArray with the test vectors along dimension 'sample'. Used for convergence statistics.
     orthogonal_subspace: np.array, optional,
         A 2D array with subspace to orthogonalize against (e.g. for deflation). The shape is (features, vectors).
     n_jobs: int, default 4
@@ -76,8 +78,7 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
         Note that these vectors are not orthogonal.
     """
     # Create an orthogonal basis from the input_vectors with QR decomposition
-    q, r = scipy.linalg.qr(input_vectors.linalg.to_basis('sample'), mode='economic', overwrite_a=True)
-    input_vectors = basis_to_xarray(q, input_vectors.dims, input_vectors.coords, input_vectors.attrs)
+    input_vectors = input_vectors.linalg.qr_orthogonalization('sample')
     basis_xr = solver.run(source=input_vectors, n_jobs=n_jobs, verbose=0)
 
     # Orthogonalize against subspace with double MGS (Modified Grahm Schmidt)
@@ -89,7 +90,7 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
 
     return basis_xr
 
-def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-2, num_test_grfs=10):
+def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-3, num_test_grfs=10):
     """
     Compute top modes using Randomized Subspace Iteration (RSI) [1].
 
@@ -109,7 +110,7 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     n_jobs: int, default 4
         Number of parallel jobs for MPI solvers. See pynoisy.forward.HGRFSolver for details.
     tol: float, default=1e-3
-        Tolerance for convergence of the representation residual statistics. Used if num_test_grfs > 0.
+        Tolerance (slope) for convergence of the representation residual statistics. Used if num_test_grfs > 0.
     num_test_grfs: int, default=10,
         Number of test GRFs used to gather representation residual statistics.
         If set to zero than adaptive convergence criteria is ignored.
@@ -118,7 +119,9 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     -------
     modes: xr.Dataset
         A Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'.
-
+    residual: dict,
+        residual['mean'] and residual['std'] contain a list of statistics for
+        'num_test_grfs' representation errors as a function of iteration. If 'num_test_grfs'=0 then the lists are empty.
 
     References
     ----------
@@ -132,39 +135,45 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
             raise AttributeError('deflation_subspace has dimensions greater than 2')
         deflation_degree = deflation_degree.shape[-1]
 
-    if num_test_grfs > 0:
-        test_grfs = solver.run(nt=nt, num_samples=num_test_grfs)
-        solver.reseed()
+    # Generate test GRFs for convergence statistics
+    if (num_test_grfs > 0):
+        random_sources = solver.sample_source(nt=nt, num_samples=num_test_grfs)
+        grf_fullrank = solver.run(source=random_sources, num_samples=num_test_grfs)
 
-    prev_residual = {'mean': np.inf, 'std': np.inf}
-    residual = {'mean': None, 'std': None}
-    basis_xr = solver.sample_source(nt=nt, num_samples=blocksize)
+        # Transform to numpy arrays
+        grf_fullrank = grf_fullrank.linalg.to_basis('sample')
+        random_sources = random_sources.linalg.to_basis('sample')
+        grf_mean_energy = np.mean(np.linalg.norm(grf_fullrank, axis=0) ** 2)
+
+    solver.reseed()
+    basis = solver.sample_source(nt=nt, num_samples=blocksize)
+    residual = {'mean': [], 'std': []}
     for iter in tqdm(range(maxiter), desc='subspace iteration'):
-        basis_xr = rsi_iteration(solver, basis_xr, deflation_subspace, n_jobs)
+        basis = rsi_iteration(solver, basis, deflation_subspace, n_jobs)
 
-        # Adaptive convergence criteria.
-        if (num_test_grfs > 0) or (iter == maxiter-1):
-            basis = basis_xr.linalg.to_basis(vector_dim='sample')
-            u, s, v = scipy.linalg.svd(basis, full_matrices=False)
-            rel_residual_samples = [
-                lsqr_projection(test_grfs.isel(sample=i), u)[0]/np.linalg.norm(test_grfs.isel(sample=i))**2  \
-                for i in range(num_test_grfs)
-            ]
-            residual['mean'], residual['std'] = np.mean(rel_residual_samples), np.std(rel_residual_samples)
+        # Adaptive convergence criteria based on test GRF statistics.
+        if (num_test_grfs > 0):
+            u, s, v = scipy.linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
+            grf_lowrank = np.matmul(u * s, np.matmul(u.T, random_sources))
+            residual_samples = np.linalg.norm(grf_lowrank - grf_fullrank, axis=0) ** 2 / grf_mean_energy
+            residual['mean'].append(np.mean(residual_samples))
+            residual['std'].append(np.std(residual_samples))
 
-            print(np.abs(residual['mean']-prev_residual['mean']), np.abs(residual['std']-prev_residual['std']))
-
-            if (np.abs(residual['mean']-prev_residual['mean']) < tol) and \
-                    (np.abs(residual['std']-prev_residual['std']) < tol):
+            if (len(residual['mean']) > 2) and (np.abs(residual['mean'][-1] - residual['mean'][-2]) < tol) and \
+                    (np.abs(residual['std'][-1] - residual['std'])[-1] < tol):
+                print('RSI converged with residual_mean = {:1.3f} ; residual_std = {:1.3f}'.format(
+                      residual['mean'][-1], residual['std'][-1]))
                 break
-            prev_residual['mean'], prev_residual['std'] = residual['mean'], residual['std']
+
+    if (num_test_grfs == 0):
+        u, s, v = scipy.linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
 
     # Eigenvectors
-    eigenvectors = basis_to_xarray(u, basis_xr.dims, basis_xr.coords, basis_xr.attrs, name='eigenvectors')
+    eigenvectors = basis_to_xarray(u, basis.dims, basis.coords, basis.attrs, name='eigenvectors')
     eigenvectors = eigenvectors.swap_dims({'sample': 'degree'})
 
     # Eigenvalues
-    degrees = range(deflation_degree, deflation_degree + basis_xr.sample.size)
+    degrees = range(deflation_degree, deflation_degree + basis.sample.size)
     eigenvalues = xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
 
     modes = xr.merge([eigenvectors, eigenvalues])
@@ -176,7 +185,11 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
         iterations=iter+1,
         deflation_subspace_degree=deflation_degree
     )
-    return modes
+
+    if (num_test_grfs > 0):
+        modes.attrs.update(residual_mean=float(residual['mean'][-1]), residual_std=float(residual['std'][-1]))
+
+    return modes, residual
 
 def projection_residual(vector, subspace, damp=0.0, return_projection=False, return_coefs=False):
     """
