@@ -9,6 +9,7 @@ import h5py
 import os
 from tqdm.auto import tqdm
 import gc
+import warnings
 
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True)):
     """
@@ -60,7 +61,6 @@ def full_like(coords, fill_value):
     array = xr.DataArray(coords=coords).fillna(fill_value)
     return array
 
-
 def load_grmhd(filepath):
     """
     Load GRMHD movie frames (.h5 file)
@@ -81,11 +81,43 @@ def load_grmhd(filepath):
     nt, nx, ny = frames.shape
     movie = xr.DataArray(data=frames,
                          coords={'t': np.linspace(0, 1, nt),
-                                 'x': np.linspace(-0.5, 0.5, nx),
-                                 'y': np.linspace(-0.5, 0.5, ny)},
-                         dims=['t', 'x', 'y'],
+                                 'y': np.linspace(-0.5, 0.5, nx),
+                                 'x': np.linspace(-0.5, 0.5, ny)},
+                         dims=['t', 'y', 'x'],
                          attrs={'GRMHD': filename})
     return movie
+
+@xr.register_dataset_accessor("movie")
+@xr.register_dataarray_accessor("movie")
+class MovieAccessor(object):
+    """
+    Register a custom accessor MovieAccessor on xarray.DataArray and xarray.Dataset objects.
+    This adds methods for 3D manipulation of data and coordinates of movies (should have dimension 't').
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def log_perturbation(self, flux_threshold=1e-15):
+        """
+        Compute the dynamic perturbation part of a movie
+            video = envelope * exp(grf) ---> grf = log(movie) - E_t(log(movie))
+
+        Arguments
+        ---------
+        flux_threshold: float, default=1e-10
+            Minimal flux value to avoid taking a logarithm of zero.
+
+        Returns
+        -------
+        log_perturbation: xr.DataArray or xr.Dataset
+            The logarithm of the data with the static part removed by subtracting mean('t').
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            log_movie = np.log(self._obj.where(self._obj > flux_threshold))
+        log_perturbation = log_movie - log_movie.mean('t')
+        log_perturbation.attrs.update(self._obj.attrs)
+        return log_perturbation
 
 @xr.register_dataset_accessor("image")
 @xr.register_dataarray_accessor("image")
@@ -97,7 +129,7 @@ class ImageAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def set_fov(self, fov, image_dims=['x', 'y']):
+    def set_fov(self, fov, image_dims=['y', 'x']):
         """
         Change the field of view of the underlying image data.
 
@@ -105,13 +137,17 @@ class ImageAccessor(object):
         ----------
         fov: float
             Field of view.
-        image_dims: [dim1, dim2], default=['x', 'y'],
+        image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
 
         Returns
         -------
         data: xr.DataArray or xr.Dataset
             A DataArray or Dataset with the underlying 2D coordinates updated.
+
+        Notes
+        -----
+        Assumes a symmetric fov across image dimensions
         """
         data = self._obj
         grid = linspace_2d((data[image_dims[0]].size, data[image_dims[1]].size),
@@ -121,7 +157,7 @@ class ImageAccessor(object):
         data.attrs.update(fov=fov)
         return data
 
-    def get_fov(self, dim='x'):
+    def get_fov(self, dim='y'):
         """
         Get the field of view from the underlying image data Coordinates.
 
@@ -134,9 +170,37 @@ class ImageAccessor(object):
         -------
         fov: float
             The field of view of the underlying DataArray
+
+        Notes
+        -----
+        Assumes a symmetric fov across image dimensions
         """
         fov = self._obj[dim][-1] - self._obj[dim][0]
         return fov
+
+    def regrid(self, num, image_dims=['y', 'x'], method='linear'):
+        """
+        Re-grid (resample) image dimensions.
+
+        Parameters
+        ----------
+        num: int or tuple (ny, nx)
+            Number of grid points. If num is a scalar the 2D coordinates are assumed to
+            have the same number of points.
+        image_dims: [dim1, dim2], default=['y', 'x'],
+            Image data dimensions.
+        method : str, default='linear'
+            The method used to interpolate. Choose from {'linear', 'nearest'} for multidimensional array.
+
+        Returns
+        -------
+        output: xr.DataArray or xr.Dataset
+            A DataArray or Dataset regridded with a new spatial resolution.
+        """
+        grid = pynoisy.utils.linspace_2d(
+            num, (self._obj[image_dims[0]][0], self._obj[image_dims[1]][0]),
+            (self._obj[image_dims[0]][-1], self._obj[image_dims[1]][-1]))
+        return self._obj.interp_like(grid,  method=method)
 
 @xr.register_dataset_accessor("polar")
 @xr.register_dataarray_accessor("polar")
@@ -219,6 +283,26 @@ class TensorAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+    def set_v_magnitude(self, magnitude):
+        """
+        Set a new velocity field magnitude.
+
+        Parameters
+        ----------
+        magnitude: scalar or xr.DataArray
+            New magnitude for the velocity field.  magnitude = sqrt(vx** 2 + vy**2).
+
+        Returns
+        -------
+        advection: xr.Dataset
+            A Dataset with velocity (vx, vy) on an x,y grid.
+        """
+        previous_magnitude = self._obj.tensor.v_magnitude
+        self._obj['vy'] = (magnitude/previous_magnitude) * self._obj['vy']
+        self._obj['vx'] = (magnitude/previous_magnitude) * self._obj['vx']
+        return self._obj
+
+
     @property
     def diffusion_coefficient(self, threshold=1e-8):
         """
@@ -272,6 +356,7 @@ class TensorAccessor(object):
         else:
             raise AttributeError('Dataset has to contain both vx and vy')
 
+
 #########
 
 uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
@@ -291,23 +376,6 @@ def load_modes(path, dtype=float):
     else:
         raise AttributeError('dtype is either float or complex')
     return modes
-
-def visualization_2d(residuals, ax=None, degree=None, contours=False, rasterized=False, vmax=None, cmap=None):
-    if ax is None:
-        fig, ax = plt.subplots(1,1, figsize=(5, 4))
-    dataset = residuals.sel(deg=degree) if degree else residuals
-    minimum = dataset[dataset.argmin(dim=['temporal_angle', 'spatial_angle'])].coords
-    dataset.plot(ax=ax, add_labels=False, rasterized=rasterized, vmax=vmax, cmap=cmap)
-    ax.scatter(minimum['temporal_angle'], minimum['spatial_angle'], s=100, c='r', marker='o', label='Global minimum')
-    if hasattr(residuals, 'true_temporal_angle'):
-        ax.scatter(residuals.true_temporal_angle, residuals.true_spatial_angle, s=100, c='w', marker='^', label='True')
-    if contours:
-        cs = dataset.plot.contour(ax=ax, cmap='RdBu_r')
-        ax.clabel(cs, inline=1, fontsize=10)
-    ax.set_title('Residual Loss (degree={})'.format(int(dataset.deg.data)),fontsize=16)
-    ax.set_xlabel('Temporal angle [rad]', fontsize=12)
-    ax.set_ylabel('Spatial angle [rad]', fontsize=12)
-    ax.legend(facecolor='white', framealpha=0.4)
 
 
 def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
@@ -527,13 +595,7 @@ def slider_select_file(dir, filetype=None):
     return file
 
 
-def grmhd_preprocessing(movie, flux_threshold=1e-10):
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        measurements = np.log(movie.where(movie > flux_threshold))
-    measurements = measurements - measurements.mean('t')
-    return measurements
+
 
 @xr.register_dataset_accessor("noisy_methods")
 @xr.register_dataarray_accessor("noisy_methods")

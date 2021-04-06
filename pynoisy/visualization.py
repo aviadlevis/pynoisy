@@ -139,6 +139,38 @@ def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdB
         anim.save(output, writer='imagemagick', fps=fps)
     return anim
 
+def plot_mean_std(mean, std, x=None, ax=None, color='tab:blue', alpha=0.35):
+    """
+    Plot mean and semi-transparent standard deviation.
+
+    Parameters
+    ----------
+    mean: list or np.array,
+        A list or numpy array with mean values. len(mean)=len(std).
+    std: list or np.array,
+        A list or numpy array with standard deviation values. len(std)=len(mean).
+    x: list or np.array, optional,
+        Horizontal axis. If None, a simple range is used.
+    ax: matplotlib axis,
+        A matplotlib axis object for the visualization.
+    true_color: color, default='tab:blue'
+        Color of the plot.
+    alpha: float in range (0, 1), default=0.35
+        Alpha transparency for the standard deviation.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(1, 1)
+
+    if len(mean) != len(std):
+        raise AttributeError('mean length ({}) != std length ({})'.format(len(mean), len(std)))
+    mean = np.array(mean)
+    std = np.array(std)
+    x = range(len(mean)) if x is None else x
+    ax.plot(x, mean, color=color)
+    ax.fill_between(x, mean + std, mean - std, facecolor=color, alpha=alpha)
+    ax.set_xlim([x[0], x[-1]])
+
+
 @xr.register_dataarray_accessor("visualization")
 class VisualizationAccessor(object):
     """
@@ -423,7 +455,7 @@ class VisualizationAccessor(object):
             factors that are not powers of two.
         color : color or color sequence, optional
             Explicit color(s) for the arrows. If *C* has been set, *color* has no effect.
-        alpha: float (0, 1.0)
+        alpha: float in range (0, 1)
             Alpha transparency for the quiver.
         width: float, optional
             Width of the arrows.

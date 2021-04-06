@@ -149,14 +149,14 @@ class HGRFSolver(object):
         Returns
         -------
         source: xr.DataArray,
-            Random Gaussian source DataArray.
+            Random Gaussian source DataArray with dimensions ['sample', 't', 'y', 'x']
         """
         seed = self.seed if seed is None else seed
         np.random.seed(seed)
         source = xr.DataArray(
-            data=np.random.randn(num_samples, nt, self.nx, self.ny) * self.forcing_strength,
-            coords={'sample': range(num_samples),  't': np.linspace(0, evolution_length, nt), 'x': self.x, 'y': self.y},
-            dims=['sample', 't', 'x', 'y'],
+            data=np.random.randn(num_samples, nt, self.ny, self.nx) * self.forcing_strength,
+            coords={'sample': range(num_samples),  't': np.linspace(0, evolution_length, nt), 'y': self.y, 'x': self.x},
+            dims=['sample', 't', 'y', 'x'],
             attrs = {'seed': seed,
                      't_units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
         )
@@ -188,7 +188,7 @@ class HGRFSolver(object):
         Parameters
         ----------
         source: xr.DataArray, optional,
-            A user specified source. The source DataArray has dims ['sample', 't', 'x' , 'y'] ('sample' is optional).
+            A user specified source. The source DataArray has dims ['sample', 't', 'y', 'x'] ('sample' is optional).
         nt: int, optional,
             Number of temporal frames (should be a power of 2). nt needs to be specified if source is not specified.
         evolution_length: float, default=100.
@@ -222,7 +222,7 @@ class HGRFSolver(object):
         Returns
         -------
         output: xr.DataArray
-            Output DataArray GRF with dims ['sample', 't', 'x' , 'y'] ('sample' is optional).
+            Output DataArray GRF with dims ['sample', 't', 'y', 'x'] ('sample' is optional).
 
         Notes
         -----
@@ -260,6 +260,9 @@ class HGRFSolver(object):
             attrs = source.attrs
             source = source * self.std_scaling_factor(nrecur)
             source.attrs.update(attrs)
+
+        # Transpose source x,y coordinates for HYPRE (k, j, i) = (t, x, y)
+        source = source.transpose('sample', 't', 'x', 'y')
 
         if self.params.num_solvers == 1:
             output_dir = os.path.dirname(self._output_file.name)

@@ -89,7 +89,7 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
 
     return basis_xr
 
-def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4):
+def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-2, num_test_grfs=10):
     """
     Compute top modes using Randomized Subspace Iteration (RSI) [1].
 
@@ -108,6 +108,11 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
         A 2D array with subspace to orthogonalize against for deflation. The shape is (features, vectors).
     n_jobs: int, default 4
         Number of parallel jobs for MPI solvers. See pynoisy.forward.HGRFSolver for details.
+    tol: float, default=1e-3
+        Tolerance for convergence of the representation residual statistics. Used if num_test_grfs > 0.
+    num_test_grfs: int, default=10,
+        Number of test GRFs used to gather representation residual statistics.
+        If set to zero than adaptive convergence criteria is ignored.
 
     Returns
     -------
@@ -127,12 +132,32 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
             raise AttributeError('deflation_subspace has dimensions greater than 2')
         deflation_degree = deflation_degree.shape[-1]
 
+    if num_test_grfs > 0:
+        test_grfs = solver.run(nt=nt, num_samples=num_test_grfs)
+        solver.reseed()
+
+    prev_residual = {'mean': np.inf, 'std': np.inf}
+    residual = {'mean': None, 'std': None}
     basis_xr = solver.sample_source(nt=nt, num_samples=blocksize)
-    for _ in tqdm(range(maxiter), desc='subspace iteration'):
+    for iter in tqdm(range(maxiter), desc='subspace iteration'):
         basis_xr = rsi_iteration(solver, basis_xr, deflation_subspace, n_jobs)
 
-    basis = basis_xr.linalg.to_basis(vector_dim='sample')
-    u, s, v = scipy.linalg.svd(basis, full_matrices=False)
+        # Adaptive convergence criteria.
+        if (num_test_grfs > 0) or (iter == maxiter-1):
+            basis = basis_xr.linalg.to_basis(vector_dim='sample')
+            u, s, v = scipy.linalg.svd(basis, full_matrices=False)
+            rel_residual_samples = [
+                lsqr_projection(test_grfs.isel(sample=i), u)[0]/np.linalg.norm(test_grfs.isel(sample=i))**2  \
+                for i in range(num_test_grfs)
+            ]
+            residual['mean'], residual['std'] = np.mean(rel_residual_samples), np.std(rel_residual_samples)
+
+            print(np.abs(residual['mean']-prev_residual['mean']), np.abs(residual['std']-prev_residual['std']))
+
+            if (np.abs(residual['mean']-prev_residual['mean']) < tol) and \
+                    (np.abs(residual['std']-prev_residual['std']) < tol):
+                break
+            prev_residual['mean'], prev_residual['std'] = residual['mean'], residual['std']
 
     # Eigenvectors
     eigenvectors = basis_to_xarray(u, basis_xr.dims, basis_xr.coords, basis_xr.attrs, name='eigenvectors')
@@ -143,6 +168,14 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     eigenvalues = xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
 
     modes = xr.merge([eigenvectors, eigenvalues])
+    modes.attrs.update(
+        blocksize=blocksize,
+        maxiter=maxiter,
+        tol=tol,
+        num_test_grfs=num_test_grfs,
+        iterations=iter+1,
+        deflation_subspace_degree=deflation_degree
+    )
     return modes
 
 def projection_residual(vector, subspace, damp=0.0, return_projection=False, return_coefs=False):
@@ -320,3 +353,22 @@ class LinearAlgebraAccessor(object):
         basis = self._obj.data.reshape(self._obj[vector_dim].size, -1).T
         return basis
 
+    def qr_orthogonalization(self, orthogonal_dim):
+        """
+        Return an orthonormal subspace from DataArray vectors.
+
+        Parameters
+        ----------
+        orthogonal_dim: string,
+            The dimension of the vector subspace along which to orthogonalize.
+            Has to be a dimension of the DataArray.
+
+
+        Returns
+        -------
+        basis: xr.DataArray
+            A DataArray with the orthogonalized subspace
+        """
+        q, r = scipy.linalg.qr(self._obj.linalg.to_basis(orthogonal_dim), mode='economic', overwrite_a=True)
+        basis = basis_to_xarray(q, self._obj.dims, self._obj.coords, self._obj.attrs)
+        return basis
