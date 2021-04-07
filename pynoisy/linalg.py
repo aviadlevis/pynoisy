@@ -90,14 +90,13 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
 
     return basis_xr
 
-def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-3, num_test_grfs=10):
+def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-3, num_test_grfs=10,
+                        tqdm_bar=True):
     """
     Compute top modes using Randomized Subspace Iteration (RSI) [1].
 
     Parameters
     ----------
-    nt: int,
-        Number of temporal frames (should be a power of 2).
     solver: pynoisy.forward.HGRFSolver,
         A Solver object which symbolically preforms matrix multiplication by solving the underlying SPDE
         See pynoisy/forward.py for more information.
@@ -114,6 +113,8 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
     num_test_grfs: int, default=10,
         Number of test GRFs used to gather representation residual statistics.
         If set to zero than adaptive convergence criteria is ignored.
+    tqdm_bar: bool, default=True
+        Show tqdm progress bar.
 
     Returns
     -------
@@ -137,18 +138,19 @@ def randomized_subspace(nt, solver, blocksize, maxiter, deflation_subspace=None,
 
     # Generate test GRFs for convergence statistics
     if (num_test_grfs > 0):
-        random_sources = solver.sample_source(nt=nt, num_samples=num_test_grfs)
-        grf_fullrank = solver.run(source=random_sources, num_samples=num_test_grfs)
+        random_sources = solver.sample_source(num_samples=num_test_grfs)
+        grf_fullrank = solver.run(source=random_sources, num_samples=num_test_grfs, verbose=0)
 
         # Transform to numpy arrays
         grf_fullrank = grf_fullrank.linalg.to_basis('sample')
         random_sources = random_sources.linalg.to_basis('sample')
         grf_mean_energy = np.mean(np.linalg.norm(grf_fullrank, axis=0) ** 2)
 
-    solver.reseed()
-    basis = solver.sample_source(nt=nt, num_samples=blocksize)
+    solver.reseed(printval=False)
+    basis = solver.sample_source(num_samples=blocksize)
     residual = {'mean': [], 'std': []}
-    for iter in tqdm(range(maxiter), desc='subspace iteration'):
+    loop = tqdm(range(maxiter), desc='subspace iteration') if tqdm_bar else range(maxiter)
+    for iter in loop:
         basis = rsi_iteration(solver, basis, deflation_subspace, n_jobs)
 
         # Adaptive convergence criteria based on test GRF statistics.

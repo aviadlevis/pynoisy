@@ -1,0 +1,47 @@
+# Configuration file for mode computation
+diffusion:
+  model: 'general_xy'               # Model name (in pynoisy/diffusion.py)
+  # Fixed parameters (see pynoisy.diffusion.general_xy parameters for detail)
+  fixed_params:
+    tau: 1.0
+    lam: 5.0
+    tensor_ratio: 0.1
+    r_cutoff: 0.5
+  # Variable parameters (see pynoisy.diffusion.general_xy parameters for detail).
+  variable_params:
+    opening_angle:
+      num: 20                       # Number of grid points.
+      range: [-1.57, 1.57]          # Parameter range.
+
+advection:
+  model: 'general_xy'               # Model name (in pynoisy/advection.py).
+  # Fixed parameters (see pynoisy.advection.general_xy parameters for detail).
+  fixed_params:
+    r_cutoff: 0.5
+  # Variable parameters (see pynoisy.advection.general_xy parameters for detail).
+  variable_params:
+    opening_angle:
+      num: 20                       # Number of grid points.
+      range: [-3.141, 3.141]        # Parameter range.
+
+grid:
+  nx: 64                            # Number of x grid points.
+  ny: 64                            # Number of y grid points.
+  nt: 64                            # Number of temporal frames
+  grid_start: [-10.0, -10.0]        # Grid start point (including) for (y, x).
+  grid_end: [10.0, 10.0]            # Grid end point (including) for (y, x).
+  evolution_length: 100.0           # Evolution time in terms of M.
+
+dataset:
+  # Set the path for the output dataset.
+  # Use <datetime> to inset the timestamp in dd-MMM-yyyy-hh:mm:ss format.
+  outpath: 'modes/opening_angles.<datetime>.nc'
+
+  # Number of parameters computed before saving.
+  # For a large number of modes, a small number is necessary to avoid memory issues.
+  # Set -1 to use compute the entire dataset in memory (for small datasets)
+  split: 20
+
+
+
+

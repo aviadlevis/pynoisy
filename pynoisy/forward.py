@@ -20,8 +20,8 @@ from os import getpid
 
 class HGRFSolver(object):
     solver_list = ['PCG', 'SMG']
-    def __init__(self, advection, diffusion, forcing_strength=1.0, seed=None, num_solvers=1, solver_type='PCG',
-                 executable='matrices'):
+    def __init__(self, advection, diffusion, nt, evolution_length=100.0, forcing_strength=1.0, seed=None, num_solvers=1,
+                 solver_type='PCG', executable='matrices'):
         """
         The Hypre Gaussian Random Field (HGRF) solver contains all the diffusion tensor fields [1] and facilitates
         input/output writing to pass parameters to and from HYPRE [2]. Input parameters and output GRFs are written to
@@ -37,6 +37,10 @@ class HGRFSolver(object):
                 - correlation_time (2D field)
                 - spatial_angle (2D field)
                 - tensor_radio (scalar).
+        nt: int,
+            Number of temporal frames (should be a power of 2).
+        evolution_length: float, default=100.
+            Evolution time in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.
         forcing_strength: float, default=1.0,
             The standard deviation of the random source.
         seed: int, optional,
@@ -62,10 +66,14 @@ class HGRFSolver(object):
             raise NotImplementedError('different coordinates for diffusion and advection not implemented')
         if solver_type not in self.solver_list:
             raise AttributeError('Not supported solver type: {}'.format(solver_type))
+        if not np.log2(nt).is_integer():
+            warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
 
         self.advection = advection
         self.diffusion = diffusion
         self.params = xr.Dataset({
+            'nt': nt,
+            'evolution_length': evolution_length,
             'seed': seed,
             'forcing_strength': forcing_strength,
             'solver_type': solver_type,
@@ -88,7 +96,7 @@ class HGRFSolver(object):
         """
         del self._param_file, self._src_file, self._output_file
 
-    def reseed(self, seed=None):
+    def reseed(self, seed=None, printval=True):
         """
         Reseed the random number generator.
 
@@ -96,6 +104,8 @@ class HGRFSolver(object):
         ----------
         seed: int, optional,
             If None, a random seed is drawn according to the datetime.
+        printval: bool, default=True
+            Print new seed value
 
         Notes
         -----
@@ -103,7 +113,8 @@ class HGRFSolver(object):
         """
         np.random.seed(hash(time.time()) % 4294967295)
         self.params['seed'] = np.random.randint(0, 32767) if seed is None else seed
-        print('Setting solver seed to: {}'.format(self.seed))
+        if printval:
+            print('Setting solver seed to: {}'.format(self.seed))
 
     def update_advection(self, advection):
         """
@@ -131,16 +142,12 @@ class HGRFSolver(object):
         """
         self.diffusion = diffusion
 
-    def sample_source(self, nt, evolution_length=100.0, num_samples=1, seed=None):
+    def sample_source(self, num_samples=1, seed=None):
         """
         Sample a random Gaussian source.
 
         Parameters
         ----------
-        nt: int,
-            Number of temporal frames (should be a power of 2).
-        evolution_length: float, default=100.
-            Evolution time in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.
         num_samples: int, default=1,
             Number of random source samples
         seed: int, optional,
@@ -154,11 +161,10 @@ class HGRFSolver(object):
         seed = self.seed if seed is None else seed
         np.random.seed(seed)
         source = xr.DataArray(
-            data=np.random.randn(num_samples, nt, self.ny, self.nx) * self.forcing_strength,
-            coords={'sample': range(num_samples),  't': np.linspace(0, evolution_length, nt), 'y': self.y, 'x': self.x},
+            data=np.random.randn(num_samples, self.nt, self.ny, self.nx) * self.forcing_strength,
+            coords={'sample': range(num_samples),  't': self.t, 'y': self.y, 'x': self.x},
             dims=['sample', 't', 'y', 'x'],
-            attrs = {'seed': seed,
-                     't_units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
+            attrs = {'seed': seed, 't_units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
         )
         return source
 
@@ -180,7 +186,7 @@ class HGRFSolver(object):
         self.advection.to_netcdf(path, group='advection', mode='a')
         self.diffusion.to_netcdf(path, group='diffusion', mode='a')
 
-    def run(self, source=None, nt=None, evolution_length=100.0, maxiter=50, nrecur=1, verbose=2, num_samples=1, tol=1e-6,
+    def run(self, source=None, maxiter=50, nrecur=1, verbose=2, num_samples=1, tol=1e-6,
             n_jobs=1, seed=None, timer=False, std_scaling=True, nprocx=1, nprocy=1, nproct=-1):
         """
         Run the SPDE solver to sample a Gaussian Random Field (GRF).
@@ -189,10 +195,7 @@ class HGRFSolver(object):
         ----------
         source: xr.DataArray, optional,
             A user specified source. The source DataArray has dims ['sample', 't', 'y', 'x'] ('sample' is optional).
-        nt: int, optional,
-            Number of temporal frames (should be a power of 2). nt needs to be specified if source is not specified.
-        evolution_length: float, default=100.
-            Evolution time in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.
+            If source is not specified, a random gaussian source is used (see HGRFSolver.sample_source method)
         maxiter: int, default=50,
             Maximum number of iteration of the underlying HYPRE (PCG or SMG) solver.
         nrecur: int, default=1,
@@ -228,27 +231,23 @@ class HGRFSolver(object):
         -----
         For positive nprocs the product should equal the number of jobs: nprox*nproxy*nproxt = n_jobs.
         """
-        # Check input parameters
         seed = self.seed if seed is None else seed
-        if (source is None) and (nt is None):
-            raise AttributeError('If the source is unspecified, the number of frames (nt) should be specified.')
-
         if source is None:
-            source = self.sample_source(nt, evolution_length, num_samples, seed)
+            source = self.sample_source(num_samples, seed)
         else:
-            nt = source.sizes['t']
-            evolution_length = source.t.max().data
-
-        if not np.log2(nt).is_integer():
-            warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
+            if (source.sizes['t'] != self.nt):
+                raise AttributeError('Input source has different number of frames to solver: {} != {}.'.format(
+                    source.sizes['t'], self.nt))
+            if not np.allclose(source.t, self.t):
+                raise AttributeError('Input source temporal grid is different to solver temporal grid.')
 
         # Save parameters to file (loaded within HYPRE)
         self.to_netcdf(self._param_file.name)
-        n_jobs, proccesing_cmd = self._parallel_processing_cmd(nt, n_jobs, nprocx, nprocy, nproct)
+        n_jobs, proccesing_cmd = self._parallel_processing_cmd(n_jobs, nprocx, nprocy, nproct)
         cmd = ['mpiexec', '-n', str(n_jobs), str(self.params.executable.data), '-seed', str(seed),  '-tol', str(tol),
                '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
                '-dump', '-params', self._param_file.name, '-solver', str(self.params.solver_id), '-tend',
-               str(evolution_length), '-x1start', str(self.x[0].data), '-x2start',  str(self.y[0].data),
+               str(self.evolution_length), '-x1start', str(self.x[0].data), '-x2start',  str(self.y[0].data),
                '-x1end',  str(self.x[-1].data), '-x2end', str(self.y[-1].data)]
         cmd.extend(proccesing_cmd)
 
@@ -298,9 +297,8 @@ class HGRFSolver(object):
             )
 
         dims = ['t', 'x', 'y']
-        coords = {'t': np.linspace(0, evolution_length, nt), 'y': self.y, 'x': self.x}
-        attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type,
-                 'std_scaling': str(std_scaling)}
+        coords = {'t': self.t, 'y': self.y, 'x': self.x}
+        attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type, 'std_scaling': str(std_scaling)}
         attrs.update(source.attrs)
 
         for sample, pixels in output:
@@ -338,14 +336,12 @@ class HGRFSolver(object):
         return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
                        self.diffusion.correlation_length ** 2).clip(min=threshold)
 
-    def _parallel_processing_cmd(self, nt, n_jobs, nprocx, nprocy, nproct):
+    def _parallel_processing_cmd(self, n_jobs, nprocx, nprocy, nproct):
         """
         Determine the domain distribution among processors and output the command line arguments.
 
         Parameters
         ----------
-        nt: int, optional,
-            Number of temporal frames (should be a power of 2). nt needs to be specified if source is not specified.
         n_jobs: int, default=1,
             Number of MPI jobs. MPI is used to subdivide the medium according to nprocx/nprocy/nproct.
         nprocx: int, default=1,
@@ -361,7 +357,7 @@ class HGRFSolver(object):
         """
         assert np.mod(self.nx, nprocx) == 0, 'nx / nprocx should be an integer'
         assert np.mod(self.ny, nprocy) == 0, 'ny / nprocy should be an integer'
-        assert np.mod(nt, nproct) == 0, 'nt / nproct should be an integer'
+        assert np.mod(self.nt, nproct) == 0, 'nt / nproct should be an integer'
 
         if (nprocx == -1):
             assert (nprocy == 1) and (nproct == 1), 'nprocx is set to -1 with nprocy or nproct different than 1.'
@@ -377,8 +373,8 @@ class HGRFSolver(object):
             warnings.warn('n_jobs is overwritten by {}: n_jobs != nprocx*nprocy*nproct.'.format(n_jobs))
 
         cmd = [
-            '-ni', str(int(self.ny / nprocy)), '-nj', str(int(self.nx / nprocx)), '-nk', str(int(nt / nproct)),
-            '-pgrid', str(int(nprocy)), str(int(nprocx)), str(int(nproct))
+            '-ni', str(int(self.ny / nprocy)), '-nj', str(int(self.nx / nprocx)), '-nk',
+            str(int(self.nt / nproct)), '-pgrid', str(int(nprocy)), str(int(nprocx)), str(int(nproct))
         ]
         return n_jobs, cmd
 
@@ -425,6 +421,19 @@ class HGRFSolver(object):
     @property
     def y(self):
         return self.advection.y
+
+    @property
+    def t(self):
+        return np.linspace(0, self.evolution_length, self.nt)
+
+    @property
+    def nt(self):
+        return int(self.params.nt)
+
+    @property
+    def evolution_length(self):
+        return float(self.params.evolution_length)
+
 
     @property
     def seed(self):

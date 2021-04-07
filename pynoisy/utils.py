@@ -1,6 +1,6 @@
 import pynoisy.linalg
 from pynoisy import eht_functions as ehtf
-import matplotlib.pyplot as plt
+import netCDF4
 import xarray as xr
 import numpy as np
 from ipywidgets import fixed, interactive
@@ -86,6 +86,60 @@ def load_grmhd(filepath):
                          dims=['t', 'y', 'x'],
                          attrs={'GRMHD': filename})
     return movie
+
+@xr.register_dataset_accessor("io")
+@xr.register_dataarray_accessor("io")
+class IOAccessor(object):
+    """
+    Register a custom accessor MovieAccessor on xarray.DataArray and xarray.Dataset objects.
+    This adds methods for input/output saving to disk large dataset and coordinates.
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def _expand_variable(self, nc_variable, data, expanding_dim, nc_shape, added_size):
+        # For time deltas, we must ensure that we use the same encoding as what was previously stored.
+        # We likely need to do this as well for variables that had custom econdings too
+        if hasattr(nc_variable, 'calendar'):
+            data.encoding = {
+                'units': nc_variable.units,
+                'calendar': nc_variable.calendar,
+            }
+        data_encoded = xr.conventions.encode_cf_variable(data)  # , name=name)
+        left_slices = data.dims.index(expanding_dim)
+        right_slices = data.ndim - left_slices - 1
+        nc_slice = (slice(None),) * left_slices + (slice(nc_shape, nc_shape + added_size),) + (slice(None),) * (
+            right_slices)
+        nc_variable[nc_slice] = data_encoded.data
+
+    def append_to_netcdf(self, filename, unlimited_dims):
+        if isinstance(unlimited_dims, str):
+            unlimited_dims = [unlimited_dims]
+
+        if len(unlimited_dims) != 1:
+            # TODO: change this so it can support multiple expanding dims
+            raise ValueError('One unlimited dim is supported, got {}'.format(len(unlimited_dims)))
+
+        unlimited_dims = list(set(unlimited_dims))
+        expanding_dim = unlimited_dims[0]
+
+        with netCDF4.Dataset(filename, mode='a') as nc:
+            nc_dims = set(nc.dimensions.keys())
+
+            nc_coord = nc[expanding_dim]
+            nc_shape = len(nc_coord)
+
+            added_size = len(self._obj[expanding_dim])
+            variables, attrs = xr.conventions.encode_dataset_coordinates(self._obj)
+
+            for name, data in variables.items():
+                if expanding_dim not in data.dims:
+                    # Nothing to do, data assumed to the identical
+                    continue
+
+                nc_variable = nc[name]
+                self._expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size)
+
 
 @xr.register_dataset_accessor("movie")
 @xr.register_dataarray_accessor("movie")
