@@ -105,10 +105,8 @@ for param_split in tqdm(param_grid, desc='parameter split', leave=True):
         diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
         solver.update_advection(advection)
         solver.update_diffusion(diffusion)
-        modes, residual = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
-                                                             n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs,
-                                                             verbose=False)
-
+        modes = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
+                                                   n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs, verbose=False)
 
         # Expand modes dimensions to include the dataset parameters
         dims = []
