@@ -38,6 +38,7 @@ dataset:
   outpath: 'modes/opening_angles.<datetime>.nc'
 
   # Number of parameters computed before saving.
+  # The dataset split should be a divisible of the fastest parameter num (defined last in the config file)
   # For a large number of modes, a small number is necessary to avoid memory issues.
   # Set -1 to use compute the entire dataset in memory (for small datasets)
   split: 20

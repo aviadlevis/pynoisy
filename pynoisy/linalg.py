@@ -91,7 +91,7 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
     return basis_xr
 
 def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_jobs=4, tol=1e-3, num_test_grfs=10,
-                        tqdm_bar=True):
+                        verbose=True):
     """
     Compute top modes using Randomized Subspace Iteration (RSI) [1].
 
@@ -113,8 +113,8 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
     num_test_grfs: int, default=10,
         Number of test GRFs used to gather representation residual statistics.
         If set to zero than adaptive convergence criteria is ignored.
-    tqdm_bar: bool, default=True
-        Show tqdm progress bar.
+    verbose: bool, default=True
+        Show tqdm progress bar and print convergence results.
 
     Returns
     -------
@@ -149,7 +149,7 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
     solver.reseed(printval=False)
     basis = solver.sample_source(num_samples=blocksize)
     residual = {'mean': [], 'std': []}
-    loop = tqdm(range(maxiter), desc='subspace iteration') if tqdm_bar else range(maxiter)
+    loop = tqdm(range(maxiter), desc='subspace iteration') if verbose else range(maxiter)
     for iter in loop:
         basis = rsi_iteration(solver, basis, deflation_subspace, n_jobs)
 
@@ -162,9 +162,10 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
             residual['std'].append(np.std(residual_samples))
 
             if (len(residual['mean']) > 2) and (np.abs(residual['mean'][-1] - residual['mean'][-2]) < tol) and \
-                    (np.abs(residual['std'][-1] - residual['std'])[-1] < tol):
-                print('RSI converged with residual_mean = {:1.3f} ; residual_std = {:1.3f}'.format(
-                      residual['mean'][-1], residual['std'][-1]))
+                    (np.abs(residual['std'][-1] - residual['std'])[-2] < tol):
+                if verbose:
+                    print('RSI converged with residual_mean = {:1.3f} ; residual_std = {:1.3f}'.format(
+                          residual['mean'][-1], residual['std'][-1]))
                 break
 
     if (num_test_grfs == 0):
@@ -172,13 +173,18 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
 
     # Eigenvectors
     eigenvectors = basis_to_xarray(u, basis.dims, basis.coords, basis.attrs, name='eigenvectors')
-    eigenvectors = eigenvectors.swap_dims({'sample': 'degree'})
+    eigenvectors = eigenvectors.swap_dims({'sample': 'degree'}).drop('sample')
 
     # Eigenvalues
     degrees = range(deflation_degree, deflation_degree + basis.sample.size)
     eigenvalues = xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
 
     modes = xr.merge([eigenvectors, eigenvalues])
+    if (num_test_grfs > 0):
+        residual_xr = xr.Dataset({'residual_mean': ('iteration', residual['mean']),
+                                  'residual_std': ('iteration', residual['std'])})
+        modes = xr.merge([modes, residual_xr])
+
     modes.attrs.update(
         blocksize=blocksize,
         maxiter=maxiter,
@@ -187,11 +193,7 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
         iterations=iter+1,
         deflation_subspace_degree=deflation_degree
     )
-
-    if (num_test_grfs > 0):
-        modes.attrs.update(residual_mean=float(residual['mean'][-1]), residual_std=float(residual['std'][-1]))
-
-    return modes, residual
+    return modes
 
 def projection_residual(vector, subspace, damp=0.0, return_projection=False, return_coefs=False):
     """
