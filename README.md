@@ -12,11 +12,12 @@ EHT measurements are Very Large Baseline Intereferometric (VLBI) measurements wh
 Installation
 ----
 Installation using using [anaconda](https://www.anaconda.com/) package management.  
-The following installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and has been tested on Linux Ubuntu 18.04.5.
+The following installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and was tested on Linux Ubuntu 18.04.5.
+Alternatively, use the singularity .def to generate a container with MPI and conda as explained below.
 
 Clone pynoisy repository with the inoisy submodule
 ```
-git clone --recurse-submodules https://github.com/aviadlevis/pynoisy
+git clone --recurse-submodules https://github.com/aviadlevis/pynoisy.git
 cd pynoisy
 ```
 Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
@@ -27,22 +28,47 @@ cd hypre/src
 make install
 cd ../../
 ``` 
-Start a virtual environment and export ./inoisy directory environment variable (this path will be used to mpirun compiled executables)
+Start a virtual environment with new environment variables
 ```
 conda create -n pynoisy python=3.7.4
 conda activate pynoisy
-conda env config vars set INOISY_DIR=$(pwd)/inoisy HYPRE_DIR=$(pwd)/hypre/src/hypre LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HYPRE_DIR/lib/
+conda env config vars set INOISY_DIR=$(pwd)/inoisy HYPRE_DIR=$(pwd)/hypre/src/hypre 
+conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/hypre/src/hypre/lib/
 conda activate pynoisy
 ```
-Install [xarray](http://xarray.pydata.org/) and its dependencies and other required packages
+Install pynoisy 
 ```
 conda install --file requirements.txt
+pip install .
+```
+Install [xarray](http://xarray.pydata.org/) and its dependencies
+```
 conda install -c conda-forge xarray dask netCDF4 bottleneck
 ```
+Install [eht-imaging](https://github.com/achael/eht-imaging)
+```
+conda install -c conda-forge pynfft requests scikit-image
+git clone https://github.com/achael/eht-imaging.git
+cd eht-imaging
+pip install .
+cd ../
+``` 
 
-
-
-
+&nbsp;
+####Singularity (Remote) Container
+Login and enter API access token:
+```
+singularity remote login
+```
+Build the image to a .sif file
+```
+singularity build --remote pynoisy_mpi.sif pynoisy_mpi.def
+```
+Run a singularity shell 
+```
+singularity shell pynoisy_mpi.sif
+```
+Now proceed with the installation instruction above cloning and installing pynoisy and the dependencies (HYPRE, xarray, eht-imaging).
 
 References
 ---
@@ -53,7 +79,7 @@ References
 fields: the stochastic partial differential equation approach](https://rss.onlinelibrary.wiley.com/doi/epdf/10.1111/j.1467-9868.2011.00777.x). Journal of the Royal Statistical Society: 
 Series B (Statistical Methodology), 73(4), pp.423-498. 
 4. `HYPRE` [computing library](https://github.com/hypre-space/hypre)
-5.  `eht-imaging` [code](https://github.com/achael/eht-imaging)
+5. `eht-imaging` [code](https://github.com/achael/eht-imaging)
 
 
 ##
