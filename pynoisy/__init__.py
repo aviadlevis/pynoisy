@@ -22,11 +22,7 @@ import pynoisy.utils
 import pynoisy.linalg
 import pynoisy.visualization
 
-# Add executables directory to path
-import os, pathlib
-current_path = pathlib.Path(__file__).parent.absolute()
-os.environ['PATH'] = os.path.join(current_path.parent, 'inoisy') + ':' + os.environ['PATH']
-
-
-
+# Add inoisy executables directory to path
+import os
+os.environ['PATH'] = os.environ['INOISY_DIR'] + ':' + os.environ['PATH']
 

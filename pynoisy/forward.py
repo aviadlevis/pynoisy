@@ -261,7 +261,7 @@ class HGRFSolver(object):
             source.attrs.update(attrs)
 
         # Transpose source x,y coordinates for HYPRE (k, j, i) = (t, x, y)
-        source = source.transpose('sample', 't', 'x', 'y')
+        source = source.transpose('sample', 't', 'x', 'y', transpose_coords=False)
 
         if self.params.num_solvers == 1:
             output_dir = os.path.dirname(self._output_file.name)
@@ -297,7 +297,7 @@ class HGRFSolver(object):
             )
 
         dims = ['t', 'x', 'y']
-        coords = {'t': self.t, 'y': self.y, 'x': self.x}
+        coords = {'t': self.t, 'x': self.x, 'y': self.y}
         attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type, 'std_scaling': str(std_scaling)}
         attrs.update(source.attrs)
 
@@ -318,7 +318,7 @@ class HGRFSolver(object):
         if (output.sample.size == 1):
             output = output.squeeze('sample').drop_vars('sample')
 
-        return output.transpose(...,'t','y','x')
+        return output.transpose(...,'t','y','x', transpose_coords=False)
 
     def std_scaling_factor(self, nrecur=1, threshold=1e-10):
         """

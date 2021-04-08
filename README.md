@@ -1,33 +1,61 @@
-# noisy
+pynoisy
+---
+pynoisy is:
+1. A python wrapper for a modified version of the `inoisy` code [1] that supports arbitrary xarray matrices as diffusion tensor fields. 
+pynoisy can be used to generate 3D (spatio-temporal) Gaussian Random Fields (GRFs) as solutions to a stochastic partial differential equation [2,3] (SPDE), which is solved using `HYPRE` computing library [4].   
+`Tutorial1` within the tutorials directory gives a notebook example on generation of GRFs.
 
-Noisy solves an advection-diffusion-decay equation that is forced by a 
-noise model.  Generates a gaussian random field.
+2. A tool for inferring parameters of stochastic fluid dynamics of black-hole accretion from Event Horizon Telescope (EHT) measurements. 
+EHT measurements are Very Large Baseline Intereferometric (VLBI) measurements which are synthesized using `eht-imaging` [5]. 
 
-Model parameters are set in `noisy.h`.
 
-Output is a series of ppm files in subdirectory `images`, and an
-ascii snapshot of the final state in `noisy.out`.
+Installation
+----
+Installation using using [anaconda](https://www.anaconda.com/) package management.  
+The following installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and has been tested on Linux Ubuntu 18.04.5.
 
-Two models are currently available.  Choose a model by editing 
-`makefile`.  
+Clone pynoisy repository with the inoisy submodule
+```
+git clone --recurse-submodules https://github.com/aviadlevis/pynoisy
+cd pynoisy
+```
+Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
+```
+git clone https://github.com/hypre-space/hypre.git
+cd hypre/src
+./configure
+make install
+cd ../../
+``` 
+Start a virtual environment and export ./inoisy directory environment variable (this path will be used to mpirun compiled executables)
+```
+conda create -n pynoisy python=3.7.4
+conda activate pynoisy
+conda env config vars set INOISY_DIR=$(pwd)/inoisy HYPRE_DIR=$(pwd)/hypre/src/hypre LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HYPRE_DIR/lib/
+conda activate pynoisy
+```
+Install [xarray](http://xarray.pydata.org/) and its dependencies and other required packages
+```
+conda install --file requirements.txt
+conda install -c conda-forge xarray dask netCDF4 bottleneck
+```
 
-`model_uniform.c` has constant advection velocity, set to 0 by default.
-    anisotropic diffusion, unit decay time, and a constant-in-time 
-    white-noise forcing.  This converges quickly to a steady-state 
-    solution of the diffusion-decay equation.  This model is useful
-    for testing the code.
-  
-`model_disk.c` mocks up an accretion disk on the sky.  Diffusion 
-    coefficients decay time, and orientation of the diffusion tensor 
-    are all space dependent.  Forcing is white noise in space *and* time.
 
-Follows Lee & Gammie 2020, based on
-[Lindgren, Rue, and Lindstrom 2011](https://rss.onlinelibrary.wiley.com/doi/10.1111/j.1467-9868.2011.00777.x)
-J.R. Statist. Soc. B 73, pp 423-498.
 
-In particular, noisy implements eq. 17, which has power spectrum given by 
-eq. 18.
 
-4 Jan 2020
 
+References
+---
+1. `inoisy`  [code](https://github.com/AFD-Illinois/inoisy)
+2. Lee, D. and Gammie, C.F., 2021. [Disks as Inhomogeneous, Anisotropic Gaussian Random Fields](https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta).
+   The Astrophysical Journal, 906(1), p.39.  
+3.  Lindgren, F., Rue, H. and Lindström, J., 2011. [An explicit link between Gaussian fields and Gaussian Markov random 
+fields: the stochastic partial differential equation approach](https://rss.onlinelibrary.wiley.com/doi/epdf/10.1111/j.1467-9868.2011.00777.x). Journal of the Royal Statistical Society: 
+Series B (Statistical Methodology), 73(4), pp.423-498. 
+4. `HYPRE` [computing library](https://github.com/hypre-space/hypre)
+5.  `eht-imaging` [code](https://github.com/achael/eht-imaging)
+
+
+##
+This code was created by Aviad Levis, California Institute of Technology, 2020.
 
