@@ -13,7 +13,7 @@ Installation
 ----
 Installation using using [anaconda](https://www.anaconda.com/) package management.  
 The following installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and was tested on Linux Ubuntu 18.04.5.
-Alternatively, use the singularity .def to generate a container with MPI and conda as explained below.
+Alternatively, use [Singularity](https://sylabs.io/singularity/) to generate a container with MPI and conda as explained below.
 
 Clone pynoisy repository with the inoisy submodule
 ```
@@ -54,9 +54,9 @@ pip install .
 cd ../
 ``` 
 
-&nbsp;
-####Singularity (Remote) Container
-Login and enter API access token:
+**Singularity Container**
+----
+Login and enter API access token
 ```
 singularity remote login
 ```
@@ -68,7 +68,7 @@ Run a singularity shell
 ```
 singularity shell pynoisy_mpi.sif
 ```
-Now proceed with the installation instruction above cloning and installing pynoisy and the dependencies (HYPRE, xarray, eht-imaging).
+Proceed with the installation instruction (above) cloning and installing pynoisy and the required dependencies (HYPRE, xarray, eht-imaging etc).
 
 References
 ---
@@ -83,5 +83,5 @@ Series B (Statistical Methodology), 73(4), pp.423-498.
 
 
 ##
-This code was created by Aviad Levis, California Institute of Technology, 2020.
+&copy; Aviad Levis, California Institute of Technology, 2020.
 
