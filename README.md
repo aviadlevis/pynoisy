@@ -2,8 +2,7 @@ pynoisy
 ---
 pynoisy is:
 1. A python wrapper for a modified version of the `inoisy` code [1] that supports arbitrary xarray matrices as diffusion tensor fields. 
-pynoisy can be used to generate 3D (spatio-temporal) Gaussian Random Fields (GRFs) as solutions to a stochastic partial differential equation [2,3] (SPDE), which is solved using `HYPRE` computing library [4].   
-`Tutorial1` within the tutorials directory gives a notebook example on generation of GRFs.
+pynoisy can be used to generate 3D (spatio-temporal) Gaussian Random Fields (GRFs) as solutions to a stochastic partial differential equation [2,3] (SPDE), which is solved using `HYPRE` computing library [4]. `Tutorial1` within the tutorials directory gives a notebook example on generation of GRFs.
 
 2. A tool for inferring parameters of stochastic fluid dynamics of black-hole accretion from Event Horizon Telescope (EHT) measurements. 
 EHT measurements are Very Large Baseline Intereferometric (VLBI) measurements which are synthesized using `eht-imaging` [5]. 
