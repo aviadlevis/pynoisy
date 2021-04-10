@@ -120,9 +120,9 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
     -------
     modes: xr.Dataset
         A Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'.
-    residual: dict,
-        residual['mean'] and residual['std'] contain a list of statistics for
-        'num_test_grfs' representation errors as a function of iteration. If 'num_test_grfs'=0 then the lists are empty.
+    residual:  xr.Dataset, optional
+        Only output if 'num_test_grfs'>0. residual['mean'] and residual['std'] contain a DataArrays with statistics for
+        'num_test_grfs' representation errors as a function of iteration.
 
     References
     ----------
@@ -180,11 +180,6 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
     eigenvalues = xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
 
     modes = xr.merge([eigenvectors, eigenvalues])
-    if (num_test_grfs > 0):
-        residual_xr = xr.Dataset({'residual_mean': ('iteration', residual['mean']),
-                                  'residual_std': ('iteration', residual['std'])})
-        modes = xr.merge([modes, residual_xr])
-
     modes.attrs.update(
         blocksize=blocksize,
         maxiter=maxiter,
@@ -193,7 +188,19 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
         iterations=iter+1,
         deflation_subspace_degree=deflation_degree
     )
-    return modes
+
+    if (num_test_grfs > 0):
+        residuals = xr.Dataset(data_vars={'mean': ('iteration', residual['mean']),
+                                         'std': ('iteration', residual['std'])},
+                              coords={'iteration': np.array(range(iter+1))+1},
+                              attrs=modes.attrs)
+        modes.attrs.update(residual_mean=float(residuals['mean'].isel(iteration=-1)),
+                           residual_std=float(residuals['std'].isel(iteration=-1)),)
+        output = (modes, residuals)
+    else:
+        output = modes
+
+    return output
 
 def projection_residual(vector, subspace, damp=0.0, return_projection=False, return_coefs=False):
     """

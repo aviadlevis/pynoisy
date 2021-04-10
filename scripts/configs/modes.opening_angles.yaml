@@ -10,6 +10,7 @@ diffusion:
   # Variable parameters (see pynoisy.diffusion.general_xy parameters for detail).
   variable_params:
     opening_angle:
+      dim_name: 'spatial_angle'     # Dimension name for the xr.Dataset
       num: 20                       # Number of grid points.
       range: [-1.57, 1.57]          # Parameter range.
 
@@ -21,6 +22,7 @@ advection:
   # Variable parameters (see pynoisy.advection.general_xy parameters for detail).
   variable_params:
     opening_angle:
+      dim_name: 'temporal_angle'    # Dimension name for the xr.Dataset
       num: 20                       # Number of grid points.
       range: [-3.141, 3.141]        # Parameter range.
 
@@ -35,13 +37,7 @@ grid:
 dataset:
   # Set the path for the output dataset.
   # Use <datetime> to inset the timestamp in dd-MMM-yyyy-hh:mm:ss format.
-  outpath: 'modes/opening_angles.<datetime>.nc'
-
-  # Number of parameters computed before saving.
-  # The dataset split should be a divisible of the fastest parameter num (defined last in the config file)
-  # For a large number of modes, a small number is necessary to avoid memory issues.
-  # Set -1 to use compute the entire dataset in memory (for small datasets)
-  split: 20
+  outpath: 'modes/opening_angles.<datetime>/mode{:04d}.nc'
 
 
 

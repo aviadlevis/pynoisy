@@ -3,6 +3,7 @@ import xarray as xr
 import pynoisy
 from tqdm import tqdm
 import argparse, time, os, itertools, yaml
+from pathlib import Path
 
 def parse_arguments():
     """Parse the command-line arguments for each run.
@@ -14,6 +15,9 @@ def parse_arguments():
     parser.add_argument('--config',
                         default='scripts/configs/modes.opening_angles.yaml',
                         help='(default value: %(default)s) Path to config yaml file.')
+    parser.add_argument('--save_residuals',
+                        action='store_true',
+                        help='Save modes residuals to files with the same format as modes.')
 
     # Randomized subspace iteration (RSI) parameters
     parser.add_argument('--blocksize',
@@ -53,36 +57,35 @@ with open(args.config, 'r') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
 
 # Setup output path and directory
-outpath = config['dataset']['outpath'].replace('<datetime>', time.strftime("%d-%b-%Y-%H:%M:%S"))
-if os.path.isdir(os.path.dirname(outpath)) is False:
-    os.mkdir(os.path.dirname(outpath))
+datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
+outpath = config['dataset']['outpath'].replace('<datetime>', datetime)
+dirpath = os.path.dirname(outpath)
+if os.path.isdir(dirpath) is False:
+    os.mkdir(dirpath)
+
+# Dataset attributes (xarray doesnt save boolean attributes)
+attrs = vars(args)
+for key in attrs.keys():
+    attrs[key] = str(attrs[key]) if isinstance(attrs[key], bool) else attrs[key]
+attrs['date'] = datetime
 
 # Generate parameter grid according to configuration file
 param_grid = []
 num_parameters = 0
-for key, value in config.items():
-    if 'variable_params' in config[key]:
-        for param, grid_spec in config[key]['variable_params'].items():
+variable_params = dict()
+for field_type, params in config.items():
+    if 'variable_params' in params:
+        for param, grid_spec in config[field_type]['variable_params'].items():
             grid = np.linspace(*grid_spec['range'], grid_spec['num'])
-            param_grid.append(list(zip([key]*grid_spec['num'], [param]*grid_spec['num'], grid)))
+            param_grid.append(list(zip([field_type]*grid_spec['num'], [param]*grid_spec['num'], grid)))
+            variable_params[field_type] = dict()
             num_parameters += 1
-
 if num_parameters > 2:
     raise AttributeError('More than 2 parameters dataset is not supported')
 
 param_grid = list(itertools.product(*param_grid))
 
-# Split dataset into chunks which fit in memory
-if config['dataset']['split'] > 0:
-    if (grid_spec['num'] % config['dataset']['split'] != 0):
-        raise AttributeError('The dataset split should be a divisible of the fastest parameter num \
-                             (defined last in the config file)')
-    split_list = lambda l, chunk: [l[i:i + chunk] for i in range(0, len(l), chunk)]
-    param_grid = split_list(param_grid, config['dataset']['split'])
-else:
-    param_grid = [param_grid]
-
-# Main iteration loop
+# Generate solver object with the fixed parameters
 diffusion_model = getattr(pynoisy.diffusion, config['diffusion']['model'])
 advection_model = getattr(pynoisy.advection, config['advection']['model'])
 advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'])
@@ -90,39 +93,36 @@ diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config
 solver = pynoisy.forward.HGRFSolver(advection, diffusion, config['grid']['nt'], config['grid']['evolution_length'],
                                     num_solvers=args.num_solvers)
 
-first_iteration = True
-for param_split in tqdm(param_grid, desc='parameter split', leave=True):
-    modes_split = []
+# Main iteration loop: compute modes and save to dataset
+for i, param in enumerate(tqdm(param_grid, desc='parameter')):
+    # Arrange according to diffusion and advection parameters
+    for p in param:
+        variable_params[p[0]][p[1]] = p[2]
 
-    for param in tqdm(param_split, desc='inner loop', leave=False):
-        # Arrange according to diffusion and advection parameters
-        variable_params = {'diffusion': {}, 'advection': {}}
-        for p in param:
-            variable_params[p[0]][p[1]] = p[2]
+    # Generate a solver object and compute modes
+    advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'], **variable_params['advection'])
+    diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
+    solver.update_advection(advection)
+    solver.update_diffusion(diffusion)
+    modes, residuals = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
+                                               n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs, verbose=False)
 
-        # Generate a solver object and compute modes
-        advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'], **variable_params['advection'])
-        diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
-        solver.update_advection(advection)
-        solver.update_diffusion(diffusion)
-        modes = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
-                                                   n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs, verbose=False)
+    # Expand modes dimensions to include the dataset parameters
+    for field_type, params in variable_params.items():
+        for param, value in params.items():
+            modes = modes.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
+            if args.save_residuals:
+                residuals = residuals.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
 
-        # Expand modes dimensions to include the dataset parameters
-        dims = []
-        for field, params in variable_params.items():
-            for key, value in params.items():
-                dims.append(field + '_' + key)
-                modes = modes.expand_dims({dims[-1]: [value]})
-        modes_split.append(modes)
+    # Save modes (and optionally residuals) to datasets
+    modes.attrs.update(attrs)
+    modes.to_netcdf(outpath.format(i))
+    if args.save_residuals:
+        residuals.to_netcdf(outpath.format(i) + '.residual')
 
-    # Concatenate and update dataset to file
-    modes_split = xr.concat(modes_split, dim=dims[-1], combine_attrs='drop')
-    modes_split.attrs.update(vars(args))
-    modes_split.attrs.update(date=time.strftime("%d-%b-%Y-%H:%M:%S"))
-    if first_iteration:
-        modes_split.to_netcdf(outpath, unlimited_dims=dims[-2])
-        first_iteration = False
-    else:
-        modes_split.io.append_to_netcdf(outpath, unlimited_dims=dims[-2])
-
+# Consolidate residuals into a single file (and delete temporary residual files)
+residuals = xr.open_mfdataset(os.path.join(dirpath, '*residual'))
+residuals.attrs.update(attrs)
+residuals.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
+for p in Path(dirpath).glob('*.residual'):
+    p.unlink()

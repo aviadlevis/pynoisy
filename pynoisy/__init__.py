@@ -17,7 +17,7 @@ import pynoisy.diffusion
 import pynoisy.advection
 import pynoisy.envelope
 import pynoisy.forward
-import pynoisy.inverse
+# import pynoisy.inverse
 import pynoisy.utils
 import pynoisy.linalg
 import pynoisy.visualization
