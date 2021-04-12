@@ -60,8 +60,7 @@ with open(args.config, 'r') as stream:
 datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
 outpath = config['dataset']['outpath'].replace('<datetime>', datetime)
 dirpath = os.path.dirname(outpath)
-if os.path.isdir(dirpath) is False:
-    os.mkdir(dirpath)
+Path(dirpath).mkdir(parents=True, exist_ok=True)
 
 # Dataset attributes (xarray doesnt save boolean attributes)
 attrs = vars(args)

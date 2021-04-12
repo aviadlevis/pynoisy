@@ -214,7 +214,7 @@ def projection_residual(vector, subspace, damp=0.0, return_projection=False, ret
         An input DataArray to project onto the subspace.
     subspace: xr.DataArray,
         A DataArray with the spanning vectors along dimension 'degree'.
-        Note that for low rank appoximation of a matrix the subspace should be the multiplication:
+        Note that for low rank approximation of a matrix the subspace should be the multiplication:
             eigenvectors * eigenvalues.
     damp: float, default=0.0
         Damping of the least-squares problem. This is a weight on the coefficients l2 norm: damp^2 * ||x||^2
@@ -347,7 +347,6 @@ def lsqr_real(b, A, damp=0.0):
     l2_grad = lambda x: 2*np.ascontiguousarray(np.real(A.conj().T.dot(A.dot(x) - b)) - (damp**2) * x)
     out = scipy.optimize.minimize(l2_loss, jac=l2_grad, method='L-BFGS-B', x0=np.zeros(A.shape[-1], dtype=np.float64))
     return out['fun'], out['x']
-
 
 @xr.register_dataarray_accessor("linalg")
 class LinearAlgebraAccessor(object):
