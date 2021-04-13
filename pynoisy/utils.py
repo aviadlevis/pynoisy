@@ -1,6 +1,5 @@
 import pynoisy.linalg
 from pynoisy import eht_functions as ehtf
-import netCDF4
 import xarray as xr
 import numpy as np
 from ipywidgets import fixed, interactive

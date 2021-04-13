@@ -1,3 +1,18 @@
+"""
+This scripts computes and saves a dataset of SPDE modes.
+The modes are computed with randomized subspace iteration (RSI) [1], see pynoisy.linalg.randomized_subspace() for
+details on the input arguments of RSI. This scripts takes a yaml configuration file as input which describes the
+dataset parameters and gridding. See `configs/modes.opening_angles.yaml` for an example configuration file.
+To see description of command line arguments and help use
+    `python compute_modes_dataset.py --h
+
+References
+----------
+..[1] Halko, N., Martinsson, P.G. and Tropp, J.A.. Finding structure with randomness: Probabilistic algorithms
+      for constructing approximate matrix decompositions. SIAM review, 53(2), pp.217-288. 2011.
+      url: https://epubs.siam.org/doi/abs/10.1137/090771806
+"""
+
 import numpy as np
 import xarray as xr
 import pynoisy
