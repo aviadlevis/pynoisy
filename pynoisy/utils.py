@@ -10,6 +10,7 @@ import os
 from tqdm.auto import tqdm
 import gc
 import warnings
+from pathlib import Path
 
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True)):
     """
@@ -61,6 +62,69 @@ def full_like(coords, fill_value):
     array = xr.DataArray(coords=coords).fillna(fill_value)
     return array
 
+def matern_sample(coords, length_scale):
+    """
+    Return a random DataArray sampled from Matern covariance.
+
+    Parameters
+    ----------
+    coords: xr.Coordinates
+        xr.Coordinates object specifying the coordinates.
+    length_scale : float or array with shape (yscale, xscale)
+        If a float, an isotropic kernel is used. If an array, an anisotropic kernel is used where each dimension
+        of defines the length-scale of the respective feature dimension (y, x).
+
+    Returns
+    -------
+    array: xr.DataArray
+        A sampled DataArray
+
+    References
+    ----------
+    url: https://scikit-learn.org/stable/modules/generated/sklearn.gaussian_process.kernels.Matern.html
+
+    Notes
+    -----
+    Sampling from high-dimensional matrices resulting from high resolution grids is time consuming.
+    For example a grid of 64x64 point makes a 4096x4096 covariance matrix which takes ~20 seconds with 24 CPU cores.
+    """
+    covariance = matern_covariance(coords['y'], coords['x'], length_scale)
+    sample = np.random.multivariate_normal(np.zeros(coords['y'].size*coords['x'].size), covariance).reshape(
+        (coords['y'].size, coords['x'].size))
+    array = xr.DataArray(data=sample, coords=coords, dims=['y', 'x'],
+                         attrs={'desc': 'Matern covariance sampled data',
+                                'length_scale': length_scale})
+    return array
+
+def matern_covariance(y, x, length_scale):
+    """
+    Generate a 2D Matern covariance.
+
+    Parameters
+    ----------
+    y: np.array
+        An array of y-coordinates.
+    x: np.array
+        An array of x-coordinates.
+    length_scale : float or array with shape (yscale, xscale)
+        If a float, an isotropic kernel is used. If an array, an anisotropic kernel is used where each dimension
+        of defines the length-scale of the respective feature dimension (y, x).
+
+    Returns
+    -------
+    covariance: np.array
+        A Matern covariance matrix of size (nx*ny, nx*ny).
+
+    References
+    ----------
+    url: https://scikit-learn.org/stable/modules/generated/sklearn.gaussian_process.kernels.Matern.html
+    """
+    from sklearn.gaussian_process.kernels import Matern
+    kernel = Matern(length_scale=length_scale)
+    xx, yy = np.meshgrid(x, y, indexing='xy')
+    covariance = kernel(np.array([yy.ravel(), xx.ravel()]).T)
+    return covariance
+
 def load_grmhd(filepath):
     """
     Load GRMHD movie frames (.h5 file)
@@ -73,73 +137,49 @@ def load_grmhd(filepath):
     Returns
     -------
     movie: xr.DataArray
-        GRMHD movie as an xarray object with dims=['t', 'x', 'y']
+        GRMHD movie as an xarray object with dims=['t', 'x', 'y'] and coordinates set to:
+            't': np.linspace(0, 1, nt)
+            'y': np.linspace(-0.5, 0.5, ny)
+            'x': np.linspace(-0.5, 0.5, nx)
     """
     filename =  os.path.abspath(filepath).split('/')[-1][:-3]
     with h5py.File(filepath, 'r') as file:
         frames = file['I'][:]
-    nt, nx, ny = frames.shape
+    nt, ny, nx = frames.shape
     movie = xr.DataArray(data=frames,
                          coords={'t': np.linspace(0, 1, nt),
-                                 'y': np.linspace(-0.5, 0.5, nx),
-                                 'x': np.linspace(-0.5, 0.5, ny)},
+                                 'y': np.linspace(-0.5, 0.5, ny),
+                                 'x': np.linspace(-0.5, 0.5, nx)},
                          dims=['t', 'y', 'x'],
                          attrs={'GRMHD': filename})
     return movie
 
-@xr.register_dataset_accessor("io")
-@xr.register_dataarray_accessor("io")
-class IOAccessor(object):
+def slider_select_file(dir, filetype=None):
     """
-    Register a custom accessor MovieAccessor on xarray.DataArray and xarray.Dataset objects.
-    This adds methods for input/output saving to disk large dataset and coordinates.
+    Slider for interactive selection of a file
+
+    Parameters
+    ----------
+    dir: str,
+        The directory from which to choose.
+    filetype:  str, optional,
+        Filetypes to display. If filetype is None then all files in the directory are displayed.
+
+    Returns
+    -------
+    file: interactive,
+        An interactive slider utility.
     """
-    def __init__(self, xarray_obj):
-        self._obj = xarray_obj
 
-    def _expand_variable(self, nc_variable, data, expanding_dim, nc_shape, added_size):
-        # For time deltas, we must ensure that we use the same encoding as what was previously stored.
-        # We likely need to do this as well for variables that had custom econdings too
-        if hasattr(nc_variable, 'calendar'):
-            data.encoding = {
-                'units': nc_variable.units,
-                'calendar': nc_variable.calendar,
-            }
-        data_encoded = xr.conventions.encode_cf_variable(data)  # , name=name)
-        left_slices = data.dims.index(expanding_dim)
-        right_slices = data.ndim - left_slices - 1
-        nc_slice = (slice(None),) * left_slices + (slice(nc_shape, nc_shape + added_size),) + (slice(None),) * (
-            right_slices)
-        nc_variable[nc_slice] = data_encoded.data
+    def select_path(i, paths):
+        print(paths[i])
+        return paths[i]
 
-    def append_to_netcdf(self, filename, unlimited_dims):
-        if isinstance(unlimited_dims, str):
-            unlimited_dims = [unlimited_dims]
-
-        if len(unlimited_dims) != 1:
-            # TODO: change this so it can support multiple expanding dims
-            raise ValueError('One unlimited dim is supported, got {}'.format(len(unlimited_dims)))
-
-        unlimited_dims = list(set(unlimited_dims))
-        expanding_dim = unlimited_dims[0]
-
-        with netCDF4.Dataset(filename, mode='a') as nc:
-            nc_dims = set(nc.dimensions.keys())
-
-            nc_coord = nc[expanding_dim]
-            nc_shape = len(nc_coord)
-
-            added_size = len(self._obj[expanding_dim])
-            variables, attrs = xr.conventions.encode_dataset_coordinates(self._obj)
-
-            for name, data in variables.items():
-                if expanding_dim not in data.dims:
-                    # Nothing to do, data assumed to the identical
-                    continue
-
-                nc_variable = nc[name]
-                self._expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size)
-
+    filetype = '*' if filetype is None else '*.' + filetype
+    paths = [str(path) for path in Path(dir).rglob('{}'.format(filetype))]
+    file = interactive(select_path, i=(0, len(paths)-1), paths=fixed(paths));
+    display(file)
+    return file
 
 @xr.register_dataset_accessor("movie")
 @xr.register_dataarray_accessor("movie")
@@ -412,26 +452,6 @@ class TensorAccessor(object):
 
 
 #########
-
-uniform_sample = lambda a, b: (b - a) * np.random.random_sample() + a
-
-def load_modes(path, dtype=float):
-    if dtype == complex:
-        modes = read_complex(path)
-    elif dtype == float:
-        try:
-            modes = xr.load_dataarray(path)
-        except ValueError:
-            modes = xr.load_dataset(path)
-    elif dtype == 'eigenvalues':
-        modes = xr.open_dataset(path).eigenvalues
-    elif dtype == 'eigenvectors':
-        modes = xr.open_dataset(path).eigenvectors
-    else:
-        raise AttributeError('dtype is either float or complex')
-    return modes
-
-
 def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
     obslist = obs.tlist()
     u = np.concatenate([obsdata['u'] for obsdata in obslist])
@@ -533,68 +553,6 @@ def opening_angles_vis_residuals(files, measurements, obs, envelope, interp_meth
 
     return output
 
-def opening_angles_grf_residuals(files, measurements, envelope=None, damp=1.0, degree=np.inf, return_coefs=False):
-    residuals, coefficients = [], []
-    for file in tqdm(files):
-        modes = load_modes(file, dtype=measurements.dtype)
-
-        residual, coefs = [], []
-        degree = min(degree, modes.deg.size)
-        for temporal_angle in tqdm(modes.temporal_angle, leave=False):
-            modes_reduced = modes.sel(temporal_angle=temporal_angle).isel(deg=slice(degree)).dropna('deg')
-            subspace = envelope * modes_reduced.eigenvectors if envelope is not None else modes_reduced.eigenvectors
-            subspace *= modes_reduced.eigenvalues
-            subspace = subspace.where(np.isfinite(measurements))
-            output = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
-            if return_coefs:
-                res, coef = output
-                coefs.append(coef.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
-            else:
-                res = output
-            residual.append(res.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
-
-        residual = xr.concat(residual, dim='temporal_angle')
-        if return_coefs:
-            coefficients.append(xr.concat(coefs, dim='temporal_angle'))
-        residuals.append(residual)
-        del modes
-        gc.collect()
-
-    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
-    residuals.attrs.update(file_num=len(files), damp=damp, with_envelope='False' if envelope is None else 'True')
-    residuals.attrs.update(measurements.attrs)
-    output = residuals
-    if return_coefs:
-        coefficients = xr.concat(coefficients, dim='spatial_angle').sortby('spatial_angle')
-        coefficients.attrs.update(residuals.attrs)
-        output = (residuals, coefficients)
-
-    return output
-
-def find_closest_modes(temporal_angle, spatial_angle, files, dtype=float):
-    if isinstance(spatial_angle, str) and (spatial_angle != 'all'):
-        raise AttributeError('Invalid attribute, spatial angle should be a float or "all"')
-    if isinstance(temporal_angle, str) and (temporal_angle != 'all'):
-        raise AttributeError('Invalid attribute, temporal angle should be a float or "all"')
-
-    spatial_angles = xr.concat(
-        [xr.open_dataset(file).spatial_angle for file in files], dim='spatial_angle').sortby('spatial_angle')
-
-    if spatial_angle != 'all':
-        spatial_angle = spatial_angles.sel(spatial_angle=spatial_angle, method='nearest')
-
-    modes = []
-    for file in files:
-        if (spatial_angle != 'all') and (xr.open_dataset(file).spatial_angle != spatial_angle):
-            continue
-        mode = load_modes(file, dtype=dtype)
-        if temporal_angle != 'all':
-            mode = mode.sel(temporal_angle=temporal_angle, method='nearest')
-        modes.append(mode)
-
-    modes = xr.concat(modes, dim='spatial_angle').sortby('spatial_angle').squeeze()
-    return modes
-
 def save_complex(dataset, *args, **kwargs):
     ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
     ds = xr.concat([ds.real, ds.imag], dim='reim')
@@ -607,46 +565,6 @@ def read_complex(*args, **kwargs):
     output = output.to_array().squeeze('variable') if len(output.data_vars.items()) == 1 else output
     return output
 
-
-def krylov_residual(solver, measurements, degree, n_jobs=4, std_scaling=False):
-    error = krylov_error_fn(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
-    loss = (error**2).mean()
-    return np.array(loss)
-
-
-def krylov_projection(solver, measurements, degree, n_jobs=4, std_scaling=False):
-    krylov = solver.run(source=measurements, nrecur=degree, verbose=0, std_scaling=std_scaling, n_jobs=n_jobs)
-    k_matrix = krylov.data.reshape(degree, -1).T
-    projection = pynoisy.linalg.least_squares_projection(measurements, k_matrix)
-    return projection
-
-def krylov_error_fn(solver, measurements, degree, n_jobs=4, std_scaling=False):
-    projection = krylov_projection(solver, measurements, degree, n_jobs, std_scaling=std_scaling)
-    error = projection - measurements
-    return error
-
-
-
-def matern_covariance(nx, ny, length_scale):
-    from sklearn.gaussian_process.kernels import Matern
-    kernel = Matern(length_scale=length_scale)
-    _grid = get_grid(nx, ny)
-    x, y = np.meshgrid(_grid.x, _grid.y)
-    covariance = kernel(np.array([x.ravel(), y.ravel()]).T)
-    return covariance
-
-def slider_select_file(dir, filetype=None):
-    from pathlib import Path
-
-    def select_path(i, paths):
-        print(paths[i])
-        return paths[i]
-
-    filetype = '*' if filetype is None else '*.' + filetype
-    paths = [str(path) for path in Path(dir).rglob('{}'.format(filetype))]
-    file = interactive(select_path, i=(0, len(paths)-1), paths=fixed(paths));
-    display(file)
-    return file
 
 
 
