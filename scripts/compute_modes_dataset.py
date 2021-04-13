@@ -13,8 +13,7 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--config',
-                        default='scripts/configs/modes.opening_angles.yaml',
-                        help='(default value: %(default)s) Path to config yaml file.')
+                        help='Path to config yaml file.')
     parser.add_argument('--save_residuals',
                         action='store_true',
                         help='Save modes residuals to files with the same format as modes.')

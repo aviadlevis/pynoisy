@@ -12,6 +12,8 @@ References
 import numpy as np
 import xarray as xr
 import pynoisy.linalg
+from functools import wraps
+import matplotlib.pyplot as plt
 import gc
 
 def compute_loss_manifold(loss_fn, modes, measurements, progress_bar=True, kwargs={}):
@@ -78,6 +80,7 @@ def dask_loss(loss_fn):
     wrapper: pynoisy.inverse.dask_loss,
         A wrapped loss function which takes care of dask related tasks with some post (and pre) processing.
     """
+    @wraps(loss_fn)
     def wrapper(modes, measurements, dim_names, **kwargs):
         subspace = modes.eigenvalues * modes.eigenvectors
         residual = loss_fn(subspace, measurements, **kwargs)
@@ -121,3 +124,142 @@ def pixel_loss_fn(subspace, measurements, damp=0.0):
     subspace = subspace.where(np.isfinite(measurements))
     loss = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp)
     return loss
+
+@xr.register_dataarray_accessor("loss")
+class LossAccessor(object):
+    """
+    Register a custom accessor LossAccessor on xarray.DataArray object.
+    This adds methods for processing and visualization of loss manifolds.
+    """
+    def __init__(self, data_array):
+        self._obj = data_array
+
+    def argmin(self):
+        """
+        Find the minimum point coordinates
+
+        Returns
+        -------
+        minimum: xr.Coordinates.
+            An xarray Coordinate object with the minimum point coordinates.
+        """
+        data = self._obj.squeeze()
+        minimum = data[data.argmin(data.dims)].coords
+        return minimum
+
+    def plot1d(self, true_val=None, ax=None, figsize=(5,4), color=None, vlinecolor='red', fontsize=16):
+        """
+        1D plot of loss curve.
+
+        Parameters
+        ----------
+        true_val: float, optional
+            The true underlying parameter value. Setting this value will plot a vertical line.
+        ax: matplotlib axis,
+            A matplotlib axis object for the visualization.
+        figsize: (float, float),
+            Figure size: (horizontal_size, vertical_size)
+        color: color, optional
+            Color of the plot data points.
+        vlinecolor: color, default='red',
+            Color of the vertical line marking the true underlying parameters. Only affects if true_val is set.
+        fontsize: float, default=16,
+            fontsize of the title.
+        """
+        data = self._obj.squeeze()
+
+        if (data.ndim != 1):
+            raise AttributeError('Loss curve should have dimension 1.')
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        data.plot(ax=ax, color=color)
+        dims = data.dims
+        if (true_val is not None):
+            ax.axvline(true_val, c=vlinecolor, linestyle='--', label='True')
+            ax.legend()
+        ax.set_ylabel('')
+        ax.set_title('Residual Loss', fontsize=fontsize)
+        ax.set_xlabel(dims[0])
+        ax.set_xlim([float(data[dims[0]].min()), float(data[dims[0]].max())])
+        plt.tight_layout()
+
+    def plot2d(self, true=None, ax=None, figsize=(5,4), contours=False, rasterized=False, vmax=None,
+               cmap=None, fontsize=16, linewidth=2.5, s=100, true_color='w', minimum_color='r'):
+        """
+        2D plot of loss manifold.
+
+        Parameters
+        ----------
+        true: dictionary, optional
+            A dictionary with the true underlying parameters specified values.
+        ax: matplotlib axis,
+            A matplotlib axis object for the visualization.
+        figsize: (float, float),
+            Figure size: (horizontal_size, vertical_size)
+        contours: bool, default=False
+            Plot contours on top of the 2D manifold.
+        rasterized: bool, default=False,
+            Set true for saving vector graphics.
+        vmax : float, optional
+            vmax defines the data range maximum that the colormap covers.
+            By default, the colormap covers the complete value range of the supplied data.
+        cmap : str or matplotlib.colors.Colormap, optional
+            The Colormap instance or registered colormap name used to map scalar data to colors.
+            Defaults to :rc:`image.cmap`.
+        fontsize: float, default=16,
+            fontsize of the title.
+        linewidth: float, default=2.5,
+            Linewidth of the True underlying parameters. Only effects if the true dictionary has *one* element.
+        s: float, default=100,
+            Size of scatter plot data points (minimum and true)
+        true_color: color, default='white'
+            Color of the true data point scatter plot. Only effects if true dictionary has *two* elements.
+        minimum_color: color, default='red',
+            Color of the minimum point scatter plot.
+        """
+        data = self._obj.squeeze()
+
+        if (data.ndim != 2):
+            raise AttributeError('Loss manifold has dimension different than 2')
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        data.plot(ax=ax, rasterized=rasterized, vmax=vmax, cmap=cmap)
+        minimum = data.loss.argmin()
+        dims = data.dims
+
+        ax.scatter(minimum[dims[1]], minimum[dims[0]], s=s, c=minimum_color, marker='o', label='Global minimum')
+        if (true is not None):
+            if isinstance(true, dict):
+                dim_index, dim_value = [], []
+                for key, val in true.items():
+                    dim_index.append(list(dims).index(key))
+                    dim_value.append(val)
+
+                # Plot a horizontal or vertical line for the true value
+                if (len(dim_value) == 1):
+                    if (dim_index[0] == 0):
+                        ax.axhline(dim_value[0], c=true_color, linestyle='--', label='True', linewidth=linewidth)
+                    else:
+                        ax.axvline(dim_value[0], c=true_color, linestyle='--', label='True', linewidth=linewidth)
+
+                # Plot a point for the true value
+                elif (len(dim_value) == 2):
+                    dim_value = np.array(dim_value)[np.argsort(dim_index)]
+                    ax.scatter(dim_value[1], dim_value[0], s=s, c=true_color, marker='^', label='True')
+
+                else:
+                    raise AttributeError('True dictionary has axis dimensions than the data')
+            else:
+                raise AttributeError('True should be a dictionary of coordinates and values.')
+
+        if contours:
+            cs = data.plot.contour(ax=ax, cmap='RdBu_r')
+            ax.clabel(cs, inline=1, fontsize=10)
+
+        ax.legend(facecolor='white', framealpha=0.4)
+        ax.set_title('Residual Loss', fontsize=fontsize)
+        plt.tight_layout()
