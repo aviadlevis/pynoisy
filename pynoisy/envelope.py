@@ -84,6 +84,7 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
         name='envelope',
         data=np.array(data, dtype=np.float64, order='C'),
         coords=grid.coords,
+        dims=['y', 'x'],
         attrs={
             'envelope_model': 'ring',
             'fov': fov,
@@ -136,6 +137,7 @@ def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
         name='envelope',
         data=np.array(data, dtype=np.float64, order='C'),
         coords=grid.coords,
+        dims=['y', 'x'],
         attrs={
             'envelope_model': 'gaussian',
             'fov': fov,
@@ -155,7 +157,7 @@ def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     ny, nx: int,
             Number of (y/x)-axis grid points.
     fov: float, default=1.0,
-        Field of view. Default is unitless 1.0.
+        Field of view. Default is unitless 1.0 (from -0.5 to +0.5).
     radius: float, default=0.2, optional,
         Disk radius.
     decay: float, default=20.
@@ -178,6 +180,7 @@ def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
         name='envelope',
         data=np.array(data, dtype=np.float64, order='C'),
         coords=grid.coords,
+        dims=['y', 'x'],
         attrs={
             'envelope_model': 'disk',
             'fov': fov,

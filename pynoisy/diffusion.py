@@ -14,7 +14,7 @@ import xarray as xr
 import pynoisy.utils
 
 def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
-               grid_start=(-10, -10), grid_end=(10, 10)):
+               grid_start=(-10, -10), grid_end=(10, 10), units='GM/c^2'):
     """
     Diffusion fields defined by the general_xy model [1].
 
@@ -35,9 +35,11 @@ def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor
     r_cutoff: float
         Cutoff radius for a smooth center point.
     grid_start: (float, float)
-        (x, y) starting grid point (included in the grid). Units of x in terms of M.
+        (x, y) starting grid point (included in the grid).
     grid_end: (float, float), default=(-10, 10)
-        (x, y) ending grid point (end point not included in the grid). Units of y in terms of M.
+        (x, y) ending grid point (end point not included in the grid).
+    units: str, default='GM/c^2',
+        Units of x/y in terms of M.
 
     Returns
     -------
@@ -52,7 +54,7 @@ def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor
     ----------
     .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
-    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end)
+    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end, units=units)
     correlation_time = general_xy_correlation_time(grid.r, tau, r_cutoff)
     correlation_length = general_xy_correlation_length(grid.r, lam, r_cutoff)
     spatial_angle = general_xy_spatial_angle(grid.theta, opening_angle)
@@ -106,7 +108,6 @@ def general_xy_correlation_length(r, lam=5.0, r_cutoff=0.5):
     })
     return correlation_length
 
-
 def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
     """
     Compute azimuthal symetric correlation time on a grid according to general_xy.
@@ -141,7 +142,6 @@ def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
         'r_cutoff': r_cutoff
     })
     return correlation_time
-
 
 def general_xy_spatial_angle(theta, opening_angle=np.pi/2 - np.pi/9):
     """

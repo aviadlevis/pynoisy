@@ -20,7 +20,7 @@ from os import getpid
 
 class HGRFSolver(object):
     solver_list = ['PCG', 'SMG']
-    def __init__(self, advection, diffusion, nt, evolution_length=100.0, forcing_strength=1.0, seed=None, num_solvers=1,
+    def __init__(self, advection, diffusion, nt, evolution_length=100.0,  t_units='GM/c^3', forcing_strength=1.0, seed=None, num_solvers=1,
                  solver_type='PCG', executable='matrices'):
         """
         The Hypre Gaussian Random Field (HGRF) solver contains all the diffusion tensor fields [1] and facilitates
@@ -40,7 +40,9 @@ class HGRFSolver(object):
         nt: int,
             Number of temporal frames (should be a power of 2).
         evolution_length: float, default=100.
-            Evolution time in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.
+            Evolution time in terms of units
+        t_units: str, default='GM/c^3'
+            t in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.
         forcing_strength: float, default=1.0,
             The standard deviation of the random source.
         seed: int, optional,
@@ -51,6 +53,9 @@ class HGRFSolver(object):
             'PCG' or 'SMG' solver types are supported for use within HYPRE Struct interface (see [3,4] for more info)
         executable: string, default='matrices',
             Currently only matrices executable is supported.
+
+
+
         References
         ----------
         .. [1] Lee, D. and Gammie, C.F., 2021. Disks as Inhomogeneous, Anisotropic Gaussian Random Fields.
@@ -74,6 +79,7 @@ class HGRFSolver(object):
         self.params = xr.Dataset({
             'nt': nt,
             'evolution_length': evolution_length,
+            't_units': t_units,
             'seed': seed,
             'forcing_strength': forcing_strength,
             'solver_type': solver_type,
@@ -164,7 +170,7 @@ class HGRFSolver(object):
             data=np.random.randn(num_samples, self.nt, self.ny, self.nx) * self.forcing_strength,
             coords={'sample': range(num_samples),  't': self.t, 'y': self.y, 'x': self.x},
             dims=['sample', 't', 'y', 'x'],
-            attrs = {'seed': seed, 't_units': 't in terms of M: t = G M / c^3 for units s.t. G = 1 and c = 1.'}
+            attrs = {'seed': seed}
         )
         return source
 
@@ -224,7 +230,7 @@ class HGRFSolver(object):
 
         Returns
         -------
-        output: xr.DataArray
+        grf: xr.DataArray
             Output DataArray GRF with dims ['sample', 't', 'y', 'x'] ('sample' is optional).
 
         Notes
@@ -298,7 +304,13 @@ class HGRFSolver(object):
 
         dims = ['t', 'x', 'y']
         coords = {'t': self.t, 'x': self.x, 'y': self.y}
-        attrs = {'tol': tol, 'maxiter': maxiter, 'solver_type': self.solver_type, 'std_scaling': str(std_scaling)}
+        attrs = {
+            'forcing_strength': self.forcing_strength,
+            'tol': tol,
+            'maxiter': maxiter,
+            'solver_type': self.solver_type,
+            'std_scaling': str(std_scaling)
+        }
         attrs.update(source.attrs)
 
         for sample, pixels in output:
@@ -318,7 +330,8 @@ class HGRFSolver(object):
         if (output.sample.size == 1):
             output = output.squeeze('sample').drop_vars('sample')
 
-        return output.transpose(...,'t','y','x')
+        grf = output.transpose(...,'t','y','x')
+        return grf
 
     def std_scaling_factor(self, nrecur=1, threshold=1e-10):
         """
@@ -424,20 +437,23 @@ class HGRFSolver(object):
 
     @property
     def t(self):
-        return np.linspace(0, self.evolution_length, self.nt)
+        return xr.DataArray(np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'unites': self.t_units})
 
     @property
     def nt(self):
-        return int(self.params.nt)
+        return int(self.params['nt'])
 
     @property
     def evolution_length(self):
-        return float(self.params.evolution_length)
+        return float(self.params['evolution_length'])
 
+    @property
+    def t_units(self):
+        return str(self.params['t_units'].data)
 
     @property
     def seed(self):
-        return int(self.params.seed)
+        return int(self.params['seed'])
 
     @property
     def solver_type(self):
@@ -451,4 +467,38 @@ class HGRFSolver(object):
     def v(self):
         return np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
+def modulate(envelope, grf, alpha, keep_attrs=True):
+    """
+    Modulate an envelope by an exponential of the Gaussian Random Field (GRF):
+        movie = envelope * np.exp(alpha * grf)
 
+    Parameters
+    ----------
+    envelope: xr.DataArray,
+        An image DataArray with dimensions ['y', 'x'].
+    grf: xr.DataArray
+        Output DataArray GRF with dims [..., 't', 'y', 'x'].
+    alpha: float, default=1.0
+        Exponential rate
+    keep_attrs: bool, default=True,
+        Keep attributed of envelope and grf.
+
+    Returns
+    -------
+    movie: xr.DataArray
+        Output modulated movie DataArray with dims [..., 't', 'y', 'x'].
+
+    Notes
+    -----
+    Envelope and GRF image coordinates need to be identical.
+    """
+    xr.testing.assert_equal(envelope['x'], grf['x'])
+    xr.testing.assert_equal(envelope['y'], grf['y'])
+    movie = np.exp(alpha * grf) * envelope
+    movie.attrs.update(alpha=alpha)
+
+    if keep_attrs:
+        movie.attrs.update(grf.attrs)
+        movie.attrs.update(envelope.attrs)
+
+    return movie

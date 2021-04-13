@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 import pynoisy.utils
 
-def general_xy(ny, nx, opening_angle=-np.pi/2, r_cutoff=0.5, grid_start=(-10, -10), grid_end=(10, 10)):
+def general_xy(ny, nx, opening_angle=-np.pi/2, r_cutoff=0.5, grid_start=(-10, -10), grid_end=(10, 10), units='GM/c^2'):
     """
     Velocity fields (vx, vy) defined by the general_xy model [1].
 
@@ -35,7 +35,7 @@ def general_xy(ny, nx, opening_angle=-np.pi/2, r_cutoff=0.5, grid_start=(-10, -1
     ----------
     .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
-    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end)
+    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end, units=units)
     magnitude = np.abs(grid.polar.w_keplerian(r_cutoff)) * grid.r
     vy = magnitude * np.sin(grid.theta + opening_angle)
     vx = magnitude * np.cos(grid.theta + opening_angle)

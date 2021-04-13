@@ -1,7 +1,7 @@
 import pynoisy.linalg
-from pynoisy import eht_functions as ehtf
 import xarray as xr
 import numpy as np
+import math
 from ipywidgets import fixed, interactive
 from IPython.display import display
 import h5py
@@ -11,7 +11,7 @@ import gc
 import warnings
 from pathlib import Path
 
-def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True)):
+def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True), units='unitless'):
     """
     Return a 2D DataArray with coordinates spaced over a specified interval.
 
@@ -26,6 +26,8 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True))
         (x, y) ending grid point (optionally included in the grid)
     endpoint: (bool, bool)
         Optionally include the stop points in the grid.
+    units: str, default='unitless'
+        Store the units of the underlying grid.
 
     Returns
     -------
@@ -39,8 +41,10 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True))
     num = (num, num) if np.isscalar(num) else num
     y = np.linspace(start[0], stop[0], num[0], endpoint=endpoint[0])
     x = np.linspace(start[1], stop[1], num[1], endpoint=endpoint[1])
-    grid = xr.Dataset(coords={'y': y, 'x': x}).polar.add_coords()
-    return grid
+    grid = xr.Dataset(coords={'y': y, 'x': x})
+    grid.y.attrs.update(units=units)
+    grid.x.attrs.update(units=units)
+    return grid.polar.add_coords()
 
 def full_like(coords, fill_value):
     """
@@ -180,11 +184,73 @@ def slider_select_file(dir, filetype=None):
     display(file)
     return file
 
-@xr.register_dataset_accessor("movie")
+def next_power_of_two(x):
+    """
+    Find the next greatest power of two
+
+    Parameters
+    ----------
+    x: int,
+        Input integer
+
+    Returns
+    -------
+    y: int
+       Next greatest power of two
+    """
+    y = 2 ** (math.ceil(math.log(x, 2)))
+    return y
+
+@xr.register_dataarray_accessor("fourier")
+class FourierAccessor(object):
+    """
+    Register a custom accessor FourierAccessor on xarray.DataArray object.
+    This adds methods Fourier manipulation of data and coordinates of movies (should have dimension 't').
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def fft(self, fft_pad_factor=2):
+        """
+        Fast Fourier transform of one or several movies. Fourier is done per each time slice.
+
+        Parameters
+        ----------
+        fft_pad_factor: float, default=2
+            A padding factor for increased fft resolution.
+
+        Returns
+        -------
+        fft: xr.DataArray,
+            A DataArray with the transformed signal.
+
+        Notes
+        -----
+        For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
+        """
+        movies = self._obj.squeeze()
+
+        # Pad images according to pad factor (interpolation in Fourier space)
+        npad = fft_pad_factor * np.max((movies.x.size, movies.y.size))
+        npad = next_power_of_two(npad)
+        padvalx1 = padvalx2 = int(np.floor((npad - movies.x.size) / 2.0))
+        if movies.x.size % 2:
+            padvalx2 += 1
+        padvaly1 = padvaly2 = int(np.floor((npad - movies.y.size) / 2.0))
+        if movies.y.size % 2:
+            padvaly2 += 1
+        padded_movies = movies.pad({'x': (padvalx1, padvalx2), 'y': (padvaly1, padvaly2)}, constant_values=0.0)
+
+        # Compute visibilities (Fourier transform) of the entire block
+        freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies.x.size, d=psize))
+        block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
+        block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
+        block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
+
 @xr.register_dataarray_accessor("movie")
 class MovieAccessor(object):
     """
-    Register a custom accessor MovieAccessor on xarray.DataArray and xarray.Dataset objects.
+    Register a custom accessor MovieAccessor on xarray.DataArray object.
     This adds methods for 3D manipulation of data and coordinates of movies (should have dimension 't').
     """
     def __init__(self, xarray_obj):
@@ -195,8 +261,8 @@ class MovieAccessor(object):
         Compute the dynamic perturbation part of a movie
             video = envelope * exp(grf) ---> grf = log(movie) - E_t(log(movie))
 
-        Arguments
-        ---------
+        Parameters
+        ----------
         flux_threshold: float, default=1e-10
             Minimal flux value to avoid taking a logarithm of zero.
 
@@ -212,6 +278,23 @@ class MovieAccessor(object):
         log_perturbation.attrs.update(self._obj.attrs)
         return log_perturbation
 
+    @property
+    def lightcurve(self):
+        """
+        The lightcurve of the movie
+
+        Returns
+        -------
+        lightcurve: xr.DataArray
+            The lightcurve of the underlying movie
+
+        Notes
+        -----
+        Assumes image dimensions to be ['y', 'x']
+        """
+        lightcurve = self._obj.sum(('y', 'x'))
+        return lightcurve
+
 @xr.register_dataset_accessor("image")
 @xr.register_dataarray_accessor("image")
 class ImageAccessor(object):
@@ -222,16 +305,18 @@ class ImageAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def set_fov(self, fov, image_dims=['y', 'x']):
+    def set_fov(self, fov, image_dims=['y', 'x'],):
         """
         Change the field of view of the underlying image data.
 
         Parameters
         ----------
-        fov: float
-            Field of view.
+        fov: tuple (float, str)
+            Field of view and units.
         image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
+        units: str, default='uas'
+            Image domain units. Default is micro arc seconds.
 
         Returns
         -------
@@ -243,33 +328,17 @@ class ImageAccessor(object):
         Assumes a symmetric fov across image dimensions
         """
         data = self._obj
+        fov, units = fov
         grid = linspace_2d((data[image_dims[0]].size, data[image_dims[1]].size),
                            (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0),
-                           endpoint=(True, True))
-        data = data.assign_coords({image_dims[0]: grid[image_dims[0]], image_dims[1]: grid[image_dims[1]]})
-        data.attrs.update(fov=fov)
+                           endpoint=(True, True), units=units)
+        for dim in image_dims:
+            data = data.assign_coords({dim: grid[dim]})
+
+        # Add polar coordinates if exist
+        if ('r' in data.coords) or ('theta' in data.coords):
+            data = data.polar.add_coords()
         return data
-
-    def get_fov(self, dim='y'):
-        """
-        Get the field of view from the underlying image data Coordinates.
-
-        Parameters
-        ----------
-        dim: str, default='x',
-            Image data dimension.
-
-        Returns
-        -------
-        fov: float
-            The field of view of the underlying DataArray
-
-        Notes
-        -----
-        Assumes a symmetric fov across image dimensions
-        """
-        fov = self._obj[dim][-1] - self._obj[dim][0]
-        return fov
 
     def regrid(self, num, image_dims=['y', 'x'], method='linear'):
         """
@@ -290,10 +359,59 @@ class ImageAccessor(object):
         output: xr.DataArray or xr.Dataset
             A DataArray or Dataset regridded with a new spatial resolution.
         """
+        units = self._obj[image_dims[0]].units if 'units' in self._obj[image_dims[0]].attrs else 'unitless'
         grid = pynoisy.utils.linspace_2d(
             num, (self._obj[image_dims[0]][0], self._obj[image_dims[1]][0]),
             (self._obj[image_dims[0]][-1], self._obj[image_dims[1]][-1]))
-        return self._obj.interp_like(grid,  method=method)
+        output = self._obj.interp_like(grid,  method=method)
+        for dim in image_dims:
+            output[dim].attrs.update(units=units)
+        return output
+
+    @property
+    def psize(self, dim='y'):
+        """
+        Get the pixel size from the underlying image data Coordinates.
+
+        Parameters
+        ----------
+        dim: str, default='y',
+            Image data dimension.
+
+        Returns
+        -------
+        psize: float
+            The pixel size of the underlying DataArray
+
+        Notes
+        -----
+        Assumes a symmetric fov across image dimensions
+        """
+        psize = self._obj.image.fov / self._obj[dim].size
+        return float(psize)
+
+    @property
+    def fov(self, dim='y'):
+        """
+        Get the field of view from the underlying image data Coordinates.
+
+        Parameters
+        ----------
+        dim: str, default='y',
+            Image data dimension.
+
+        Returns
+        -------
+        fov: tuple (float, str),
+            The field of view and units of the underlying DataArray
+
+        Notes
+        -----
+        Assumes a symmetric fov across image dimensions
+        """
+        fov = self._obj[dim][-1] - self._obj[dim][0]
+        return (float(fov), self._obj[dim].units)
+
 
 @xr.register_dataset_accessor("polar")
 @xr.register_dataarray_accessor("polar")
@@ -315,7 +433,15 @@ class PolarAccessor(object):
         yy, xx = np.meshgrid(y, x, indexing='ij')
         r = np.sqrt(xx ** 2 + yy ** 2)
         theta = np.arctan2(yy, xx)
-        return self._obj.assign_coords({'r': (['y', 'x'], r), 'theta': (['y', 'x'], theta)})
+        grid = self._obj.assign_coords({'r': (['y', 'x'], r), 'theta': (['y', 'x'], theta)})
+
+        # Add units to 'r' and 'theta'
+        if ('units' in grid['y'].attrs) and ('units' in grid['x'].attrs):
+            if grid['y'].units != grid['x'].units:
+                raise AttributeError('different units for x and y not supported')
+            grid['r'].attrs.update(units=grid['y'].units)
+        grid['theta'].attrs.update(units='rad')
+        return grid
 
     def r_cutoff(self, r0, fr0, dfr0, f0):
         """
@@ -563,9 +689,6 @@ def read_complex(*args, **kwargs):
     output.attrs.update(ds.attrs)
     output = output.to_array().squeeze('variable') if len(output.data_vars.items()) == 1 else output
     return output
-
-
-
 
 
 @xr.register_dataset_accessor("noisy_methods")

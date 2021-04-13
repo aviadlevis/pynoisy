@@ -40,7 +40,6 @@ def compute_block_visibilities(movies, psize, obs=None, fft_pad_factor=2, conjug
     """
     Modification of ehtim's observe_same_nonoise method.
 
-
     Args:
         movies (xr.DataArray): a 3D/4D dataarray with a single or multiple movies
         psize (float): pixel size in [rad]
