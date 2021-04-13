@@ -6,17 +6,15 @@ import numpy as np
 import xarray as xr
 import pynoisy.utils as utils
 
-def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
+def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
          photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=1.0):
     """
     Ring envelope with a brighter photon ring in the inner-most orbit [1].
 
     Parameters
     ----------
-    nx: int,
-        Number of x-axis grid points.
-    ny: int,
-        Number of y-axis grid points.
+    ny, nx: int,
+            Number of (y/x)-axis grid points.
     fov: float, default=1.0,
         Field of view. Default is unitless 1.0.
     inner_radius: float, default=0.2,
@@ -41,7 +39,7 @@ def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
     Returns
     -------
     envelope: xr.DataArray,
-        An image DataArray with dimensions ['x', 'y'].
+        An image DataArray with dimensions ['y', 'x'].
 
     References
     ----------
@@ -49,7 +47,7 @@ def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
            The Astrophysical Journal Letters, 885(2), p.L33. 2019.
            url: https://iopscience.iop.org/article/10.3847/2041-8213/ab518c/pdf
     """
-    grid = utils.linspace_2d((nx, ny), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
+    grid = utils.linspace_2d((ny, nx), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
     r = grid.r.data
 
     zone0_radius = inner_radius
@@ -103,16 +101,14 @@ def ring(nx, ny, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
     envelope *= (total_flux / envelope.sum())
     return envelope
 
-def gaussian(nx, ny, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
+def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
     """
     Gaussian envelope.
 
     Parameters
     ----------
-    nx: int,
-        Number of x-axis grid points.
-    ny: int,
-        Number of y-axis grid points.
+    ny, nx: int,
+            Number of (y/x)-axis grid points.
     fov: float, default=1.0,
         Field of view. Default is unitless 1.0.
     std: float, default=0.2, optional,
@@ -125,14 +121,14 @@ def gaussian(nx, ny, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
     Returns
     -------
     envelope: xr.DataArray,
-        An image DataArray with dimensions ['x', 'y'].
+        An image DataArray with dimensions ['y', 'x'].
     """
     if fwhm is None:
         fwhm = std * np.sqrt(2 * np.log(2)) * 2 / np.sqrt(2)
     else:
         std = fwhm * np.sqrt(2) / (np.sqrt(2 * np.log(2)) * 2)
 
-    grid = utils.linspace_2d((nx, ny), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    grid = utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
     r = grid.r.data
     data = np.exp(-(r / std) ** 2)
 
@@ -150,16 +146,14 @@ def gaussian(nx, ny, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
     envelope *= (total_flux / envelope.sum())
     return envelope
 
-def disk(nx, ny, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
+def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     """
     Disk envelope.
 
     Parameters
     ----------
-    nx: int,
-        Number of x-axis grid points.
-    ny: int,
-        Number of y-axis grid points.
+    ny, nx: int,
+            Number of (y/x)-axis grid points.
     fov: float, default=1.0,
         Field of view. Default is unitless 1.0.
     radius: float, default=0.2, optional,
@@ -172,9 +166,9 @@ def disk(nx, ny, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     Returns
     -------
     envelope: xr.DataArray,
-        An image DataArray with dimensions ['x', 'y'].
+        An image DataArray with dimensions ['y', 'x'].
     """
-    grid = utils.linspace_2d((nx, ny), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    grid = utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
     data = utils.full_like(grid.coords, fill_value=1.0)
     data.values[data.r >= .95 * radius] = 0
     exponential_decay = np.exp(-decay * (data.r - .95 * radius))

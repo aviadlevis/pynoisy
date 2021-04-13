@@ -20,10 +20,8 @@ def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor
 
     Parameters
     ----------
-    nx: int,
-        Number of x-axis grid points.
-    ny: int,
-        Number of y-axis grid points.
+    ny, nx: int,
+            Number of (y/x)-axis grid points.
     opening_angle: float, default = np.pi/2 - np.pi/9
         This angle defines the opening angle of spirals with respect to the local radius.
         A positive angle rotates the correlation to match clockwise rotation trailing spiral arms.
