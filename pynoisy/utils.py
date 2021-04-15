@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 import gc
 import warnings
 from pathlib import Path
+import inspect
 
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True), units='unitless'):
     """
@@ -205,19 +206,78 @@ def next_power_of_two(x):
 class FourierAccessor(object):
     """
     Register a custom accessor FourierAccessor on xarray.DataArray object.
-    This adds methods Fourier manipulation of data and coordinates of movies (should have dimension 't').
+    This adds methods Fourier manipulations of data and coordinates of movies and images.
     """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def fft(self, fft_pad_factor=2):
+    def _phase(self, u, v, psize, image_dim_sizes, fft_dims=['u', 'v']):
         """
-        Fast Fourier transform of one or several movies. Fourier is done per each time slice.
+        Extra phase to match centroid convention.
+
+        Parameters
+        ----------
+        u, v: np.arrays or xr.DataArray
+            arrays of Fourier frequencies.
+        psize: float,
+            pixel size
+        image_dim_sizes: tuple (image_dim0.size, image_dim1.size)
+            Image dimension sizes (without padding)
+        fft_dims: [dim1, dim2], default=['u', 'v']
+            Fourier data dimensions.
+
+        Returns:
+        ----------
+        phase: xr.DataArray
+            A 2D phase function
+        """
+        phase = np.exp(-1j * np.pi * psize * ((1 + image_dim_sizes[0] % 2) * u +
+                                              (1 + image_dim_sizes[1] % 2) * v))
+        return phase
+
+    def _trianglePulse2D(self, u, v, psize, fft_dims=['u', 'v']):
+        """
+        Modification of eht-imaging trianglePulse_F for a DataArray of points
+
+        Parameters
+        ----------
+        u, v: np.arrays or xr.DataArray
+            arrays of Fourier frequencies.
+        psize: float,
+            pixel size
+        fft_dims: [dim1, dim2], default=['u', 'v']
+            Fourier data dimensions.
+
+        Returns
+        -------
+        pulse: xr.DataArray
+            A 2D triangle pulse function
+
+        References:
+        ----------
+        https://github.com/achael/eht-imaging/blob/50e728c02ef81d1d9f23f8c99b424705e0077431/ehtim/observing/pulses.py#L91
+        """
+        pulse_u = (4.0 / (psize ** 2 * (2*np.pi*u) ** 2)) * (np.sin((psize * (2*np.pi*u)) / 2.0)) ** 2
+        pulse_u[2*np.pi*u == 0] = 1.0
+
+        pulse_v = (4.0 / (psize ** 2 * (2*np.pi*v) ** 2)) * (np.sin((psize * (2*np.pi*v)) / 2.0)) ** 2
+        pulse_v[2*np.pi*v == 0] = 1.0
+
+        return pulse_u * pulse_v
+
+    def fft(self, fft_pad_factor=2, image_dims=['y', 'x'], fft_dims=['u', 'v']):
+        """
+        Fast Fourier transform of one or several movies.
+        Fourier is done per each time slice on image dimensions
 
         Parameters
         ----------
         fft_pad_factor: float, default=2
             A padding factor for increased fft resolution.
+        image_dims: [dim1, dim2], default=['y', 'x'],
+            Image data dimensions.
+        fft_dims: [dim1, dim2], default=['u', 'v']
+            Fourier data dimensions.
 
         Returns
         -------
@@ -229,23 +289,31 @@ class FourierAccessor(object):
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
         movies = self._obj.squeeze()
+        if ('x' not in movies.dims) or ('y' not in movies.dims):
+            raise AttributeError('DataArray needs both x and y coordinate')
+        np.testing.assert_equal(movies[image_dims[0]].data, movies[image_dims[1]].data)
 
         # Pad images according to pad factor (interpolation in Fourier space)
-        npad = fft_pad_factor * np.max((movies.x.size, movies.y.size))
-        npad = next_power_of_two(npad)
-        padvalx1 = padvalx2 = int(np.floor((npad - movies.x.size) / 2.0))
-        if movies.x.size % 2:
-            padvalx2 += 1
-        padvaly1 = padvaly2 = int(np.floor((npad - movies.y.size) / 2.0))
-        if movies.y.size % 2:
-            padvaly2 += 1
-        padded_movies = movies.pad({'x': (padvalx1, padvalx2), 'y': (padvaly1, padvaly2)}, constant_values=0.0)
+        ny, nx = movies[image_dims[0]].size, movies[image_dims[1]].size
+        npad = next_power_of_two(fft_pad_factor * np.max((nx, ny)))
+        padvalx1 = padvalx2 = int(np.floor((npad - nx) / 2.0))
+        padvaly1 = padvaly2 = int(np.floor((npad - ny) / 2.0))
+        padvalx2 += 1 if nx % 2 else 0
+        padvaly2 += 1 if ny % 2 else 0
+        padded_movies = movies.pad({image_dims[0]: (padvaly1, padvaly2),
+                                    image_dims[1]: (padvalx1, padvalx2)}, constant_values=0.0)
 
         # Compute visibilities (Fourier transform) of the entire block
-        freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies.x.size, d=psize))
-        block_fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
-        block_fourier = xr.DataArray(block_fourier, coords=padded_movies.coords)
-        block_fourier = block_fourier.rename({'x': 'u', 'y': 'v'}).assign_coords(u=freqs, v=freqs)
+        psize = movies.image.psize
+        freqs = np.fft.fftshift(np.fft.fftfreq(n=padded_movies[image_dims[0]].size, d=psize))
+        fft = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(padded_movies)))
+
+        coords = padded_movies.coords.to_dataset()
+        for image_dim, fft_dim in zip(image_dims, fft_dims):
+            coords = coords.swap_dims({image_dim: fft_dim}).drop(image_dim).assign_coords({fft_dim: freqs})
+            coords[fft_dim].attrs.update(inverse_units=movies[image_dim].units)
+        fft = xr.DataArray(data=fft, dims=coords.dims, coords=coords.coords)
+        return fft
 
 @xr.register_dataarray_accessor("movie")
 class MovieAccessor(object):
@@ -255,6 +323,11 @@ class MovieAccessor(object):
     """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
+
+    def set_time(self, tstart, tstop, units='UTC hr'):
+        movie = self._obj.assign_coords(t=np.linspace(tstart, tstop, self._obj.t.size))
+        movie.t.attrs.update(units=units)
+        return movie
 
     def log_perturbation(self, flux_threshold=1e-15):
         """
@@ -387,7 +460,7 @@ class ImageAccessor(object):
         -----
         Assumes a symmetric fov across image dimensions
         """
-        psize = self._obj.image.fov / self._obj[dim].size
+        psize = self._obj.image.fov[0] / self._obj[dim].size
         return float(psize)
 
     @property
@@ -423,23 +496,40 @@ class PolarAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def add_coords(self):
+    def add_coords(self, image_dims=['y', 'x']):
         """
-        Add polar coordinates to x,y grid.
+        Add polar coordinates to image_dimensions
+
+        Parameters
+        ----------
+        image_dims: [dim1, dim2], default=['y', 'x'],
+            Image data dimensions.
+
+        Returns
+        -------
+        grid: xr.DataArray,
+            A data array with additional polar coordinates 'r' and 'theta'
         """
-        if not('x' in self._obj.coords and 'y' in self._obj.coords):
+        if not(image_dims[0] in self._obj.coords and image_dims[1] in self._obj.coords):
             raise AttributeError('Coordinates have to contain both x and y')
-        x, y = self._obj['x'], self._obj['y']
+        x, y = self._obj[image_dims[0]], self._obj[image_dims[1]]
         yy, xx = np.meshgrid(y, x, indexing='ij')
         r = np.sqrt(xx ** 2 + yy ** 2)
         theta = np.arctan2(yy, xx)
-        grid = self._obj.assign_coords({'r': (['y', 'x'], r), 'theta': (['y', 'x'], theta)})
+        grid = self._obj.assign_coords({'r': ([image_dims[0], image_dims[1]], r),
+                                        'theta': ([image_dims[0], image_dims[1]], theta)})
 
         # Add units to 'r' and 'theta'
-        if ('units' in grid['y'].attrs) and ('units' in grid['x'].attrs):
-            if grid['y'].units != grid['x'].units:
+        units = None
+        if ('units' in grid[image_dims[0]].attrs) and ('units' in grid[image_dims[1]].attrs):
+            units = 'units'
+        elif ('inverse_units' in grid[image_dims[0]].attrs) and ('inverse_units' in grid[image_dims[1]].attrs):
+            units = 'inverse_units'
+
+        if units is not None:
+            if grid[image_dims[0]].attrs[units] != grid[image_dims[1]].attrs[units]:
                 raise AttributeError('different units for x and y not supported')
-            grid['r'].attrs.update(units=grid['y'].units)
+            grid['r'].attrs.update({units: grid[image_dims[0]].attrs[units]})
         grid['theta'].attrs.update(units='rad')
         return grid
 
@@ -575,6 +665,18 @@ class TensorAccessor(object):
         else:
             raise AttributeError('Dataset has to contain both vx and vy')
 
+def aggregate_kwargs(func, *args, **kwargs):
+    """
+    Update kwargs dictionary with args and defaults parameters for func
+    """
+    signature = inspect.signature(func)
+    kwargs.update(
+        {k: v.default for k, v in signature.parameters.items() if v.default is not inspect.Parameter.empty}
+    )
+    args_keys = list(signature.parameters.keys())
+    for i, arg in enumerate(args):
+        kwargs.update({args_keys[i]: arg})
+    return kwargs
 
 #########
 def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
@@ -721,3 +823,5 @@ class noisy_methods(object):
             movies = movies.assign_coords(t=np.linspace(tstart, tstop, movies.t.size))
             movies.attrs.update(tstart = tstart, tstop = tstop)
         return movies
+
+

@@ -437,7 +437,7 @@ class HGRFSolver(object):
 
     @property
     def t(self):
-        return xr.DataArray(np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'unites': self.t_units})
+        return xr.DataArray(np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'units': self.t_units})
 
     @property
     def nt(self):
