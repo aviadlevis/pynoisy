@@ -12,92 +12,12 @@ References
 import numpy as np
 import xarray as xr
 import pynoisy.linalg
-from functools import wraps
 import matplotlib.pyplot as plt
 import gc
+from pynoisy.utils import mode_map
 
-def compute_loss_manifold(loss_fn, modes, measurements, progress_bar=True, kwargs={}):
-    """
-    Compute loss manifold using using dask parallel processing.
-
-    Parameters
-    ----------
-    loss_fn:  pynoisy.inverse.dask_loss,
-        A decorated loss function (@dask_loss) with inputs: loss_fn(subspace, measurements, **kwargs).
-    modes: xr.Dataset,
-        A lazy loaded (dask array data) Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'
-        and manifold dimensions. To load a dataset from  use: modes = xr.open_mfdataset('directoy/*.nc')
-    measurements: xr.DataArray,
-        Measurement DataArray. This could be e.g. movie pixels or visibility measurements.
-    progress_bar: bool, default=True,
-        Progress bar is useful as manifold computations can be time consuming.
-    kwargs: dictionary, optional,
-        Keyword arguments for the loss_fun.
-
-    Returns
-    -------
-    loss_dataset: xr.Dataset
-        A Dataset computed at every manifold grid point with variables:
-            'data'=||Ax* - b||^2 ,
-            'total'=||Ax* - b||^2 + d^2 ||x*||^2.
-    """
-
-    # Manifold dimensions are the modes dimensions without ['degree', 't', 'x', 'y'].
-    coords = modes.coords.to_dataset()
-    for dim in ['degree', 't', 'x', 'y']:
-        del coords[dim]
-    dim_names = list(coords.dims.keys())
-    dim_sizes = list(coords.dims.values())
-
-    # Generate an output template for dask which fits in a single chunk.
-    template = xr.Dataset(
-        coords=coords, data_vars={'data': (dim_names, np.empty(dim_sizes)),
-                                  'total': (dim_names, np.empty(dim_sizes))}
-    ).chunk(dict(zip(dim_names, [1] * len(dim_names))))
-
-    # Generate dask computation graph
-    mapped = xr.map_blocks(loss_fn, modes, args=(measurements, dim_names), kwargs=kwargs, template=template)
-
-    # Preform actual computation with or without progress bar (may be time consuming)
-    if progress_bar:
-        from dask.diagnostics import ProgressBar
-        with ProgressBar():
-            loss_dataset = mapped.compute()
-    else:
-        loss_dataset = mapped.compute()
-    return loss_dataset
-
-def dask_loss(loss_fn):
-    """
-    A decorator (wrapper) for dask computations, used in conjunction to the function compute_loss_manifold().
-    This decorator wraps a loss function with inputs: loss_fn(subspace, measurements, **kwargs).
-    The subspace is computed by: subspace = eigenvectors * eigenvalues. It is deleted (and garbage collected)
-    to avoid memory overload. The resulting residual dimensions are expanded to the manifold dimensions.
-
-
-    Returns
-    -------
-    wrapper: pynoisy.inverse.dask_loss,
-        A wrapped loss function which takes care of dask related tasks with some post (and pre) processing.
-    """
-    @wraps(loss_fn)
-    def wrapper(modes, measurements, dim_names, **kwargs):
-        subspace = modes.eigenvalues * modes.eigenvectors
-        residual = loss_fn(subspace, measurements, **kwargs)
-
-        # Expand dimensions
-        dims = dict([(dim, subspace[dim].data) for dim in dim_names])
-        residual = residual.expand_dims(dims)
-
-        # Release memory
-        del subspace
-        gc.collect()
-
-        return residual
-    return wrapper
-
-@dask_loss
-def pixel_loss_fn(subspace, measurements, damp=0.0):
+@mode_map('Dataset', ['total', 'data'])
+def compute_pixel_loss(modes, measurements, damp=0.0):
     """
     Compute projection residual of the *direct pixel measurements* onto the subspace.
     The function solves ``min ||Ax - b||^2`` or the damped version: ``min ||Ax - b||^2 + d^2 ||x||^2``,
@@ -105,10 +25,9 @@ def pixel_loss_fn(subspace, measurements, damp=0.0):
 
     Parameters
     ----------
-    subspace: xr.DataArray,
-        A DataArray with the spanning vectors along dimension 'degree'.
-        Note that for low rank approximation of a matrix the subspace should be the multiplication:
-        eigenvectors * eigenvalues.
+    modes: xr.Dataset,
+        A lazy loaded (dask array data) Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'
+        and manifold dimensions. To load a dataset from  use: modes = xr.open_mfdataset('directoy/*.nc')
     measurements: xr.DataArray,
         An input DataArray with direct pixel measurements.
     damp: float, default=0.0
@@ -120,9 +39,19 @@ def pixel_loss_fn(subspace, measurements, damp=0.0):
         A Dataset computed at every manifold grid point with variables:
             'data'=||Ax* - b||^2 ,
             'total'=||Ax* - b||^2 + d^2 ||x*||^2.
+
+    Notes
+    -----
+    To avoid memory overload subspace is deleted and garbage collected.
     """
+    subspace = modes.eigenvalues * modes.eigenvectors
     subspace = subspace.where(np.isfinite(measurements))
     loss = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp)
+
+    # Release memory
+    del subspace
+    gc.collect()
+
     return loss
 
 @xr.register_dataarray_accessor("loss")
@@ -140,12 +69,13 @@ class LossAccessor(object):
 
         Returns
         -------
-        minimum: xr.Coordinates.
-            An xarray Coordinate object with the minimum point coordinates.
+        minimum_dict: dict.
+            An dictionary with the minimum point coordinates.
         """
         data = self._obj.squeeze()
         minimum = data[data.argmin(data.dims)].coords
-        return minimum
+        minimum_dict = dict((key,float(value)) for key, value in minimum.items())
+        return minimum_dict
 
     def plot1d(self, true_val=None, ax=None, figsize=(5,4), color=None, vlinecolor='red', fontsize=16):
         """

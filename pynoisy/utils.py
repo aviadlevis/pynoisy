@@ -11,6 +11,8 @@ import gc
 import warnings
 from pathlib import Path
 import inspect
+from dask.diagnostics import ProgressBar
+from functools import wraps
 
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True), units='unitless'):
     """
@@ -485,7 +487,6 @@ class ImageAccessor(object):
         fov = self._obj[dim][-1] - self._obj[dim][0]
         return (float(fov), self._obj[dim].units)
 
-
 @xr.register_dataset_accessor("polar")
 @xr.register_dataarray_accessor("polar")
 class PolarAccessor(object):
@@ -677,6 +678,71 @@ def aggregate_kwargs(func, *args, **kwargs):
     for i, arg in enumerate(args):
         kwargs.update({args_keys[i]: arg})
     return kwargs
+
+def mode_map(output_type, data_vars=None, progress_bar=True):
+    """
+    A decorator (wrapper) for dask computations over the entire mode dataset for an output a DataArray or Dataset.
+
+    Parameters
+    ----------
+    output_type: 'DataArray' or 'Dataset'
+        Two xarray output types
+    data_dars: string or list of strings, optional
+        If the output_type is Dataset, the string/list of strings should specify the data_vars
+    progress_bar: bool, default=True,
+        Progress bar is useful as manifold computations can be time consuming.
+
+    Returns
+    -------
+    wrapper: pynoisy.utils.mode_map,
+        A wrapped function which takes care of dask related tasks with some pre processing.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(modes, *args, **kwargs):
+            # Manifold dimensions are the modes dimensions without ['degree', 't', 'x', 'y'].
+            coords = modes.coords.to_dataset()
+            for dim in ['degree', 't', 'x', 'y']:
+                del coords[dim]
+            dim_names = list(coords.dims.keys())
+            dim_sizes = list(coords.dims.values())
+
+            # Generate an output template for dask which fits in a single chunk
+            if (output_type == 'Dataset'):
+                if data_vars is None:
+                    raise AttributeError('For output_type="Dataset" data_vars arguments should be specified')
+
+                data_dict = dict()
+                if isinstance(data_vars, str):
+                    data_dict[data_vars] = (dim_names, np.empty(dim_sizes))
+                elif isinstance(data_vars, list):
+                    for var_name in data_vars:
+                        data_dict[var_name] = (dim_names, np.empty(dim_sizes))
+                else:
+                    raise AttributeError('data_vars can be either string or list of strings')
+
+                template = xr.Dataset(data_vars=data_dict, coords=coords.coords).chunk(
+                    dict(zip(dim_names, [1] * len(dim_names))))
+
+            elif (output_type == 'DataArray'):
+                template = xr.DataArray(coords=coords.coords).chunk(
+                    dict(zip(dim_names, [1] * len(dim_names))))
+
+            else:
+                raise AttributeError('data types allowed are: "DataArray" or "Dataset"')
+
+            # Generate dask computation graph
+            mapped = xr.map_blocks(func, modes, template=template, args=args, kwargs=kwargs)
+
+            if progress_bar:
+                with ProgressBar():
+                    output = mapped.compute()
+            else:
+                output = mapped.compute()
+            return output
+        return wrapper
+
+    return decorator
 
 #########
 def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
