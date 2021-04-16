@@ -134,8 +134,9 @@ for i, param in enumerate(tqdm(param_grid, desc='parameter')):
         residuals.to_netcdf(outpath.format(i) + '.residual')
 
 # Consolidate residuals into a single file (and delete temporary residual files)
-residuals = xr.open_mfdataset(os.path.join(dirpath, '*residual'))
-residuals.attrs.update(attrs)
-residuals.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
-for p in Path(dirpath).glob('*.residual'):
-    p.unlink()
+if args.save_residuals:
+    residuals = xr.open_mfdataset(os.path.join(dirpath, '*residual'))
+    residuals.attrs.update(attrs)
+    residuals.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
+    for p in Path(dirpath).glob('*.residual'):
+        p.unlink()

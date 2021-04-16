@@ -252,7 +252,7 @@ class HGRFSolver(object):
         n_jobs, proccesing_cmd = self._parallel_processing_cmd(n_jobs, nprocx, nprocy, nproct)
         cmd = ['mpiexec', '-n', str(n_jobs), str(self.params.executable.data), '-seed', str(seed),  '-tol', str(tol),
                '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
-               '-dump', '-params', self._param_file.name, '-solver', str(self.params.solver_id), '-tend',
+               '-dump', '-params', self._param_file.name, '-solver', str(self.params.solver_id.data), '-tend',
                str(self.evolution_length), '-x1start', str(self.x[0].data), '-x2start',  str(self.y[0].data),
                '-x1end',  str(self.x[-1].data), '-x2end', str(self.y[-1].data)]
         cmd.extend(proccesing_cmd)
