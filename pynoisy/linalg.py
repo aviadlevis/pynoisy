@@ -8,11 +8,12 @@ References
       for constructing approximate matrix decompositions. SIAM review, 53(2), pp.217-288. 2011.
       url: https://epubs.siam.org/doi/abs/10.1137/090771806
 """
-import xarray as xr
-import numpy as np
-import scipy.linalg
-from scipy.sparse.linalg import lsqr
-from tqdm.auto import tqdm
+import xarray as _xr
+import numpy as _np
+from scipy.sparse.linalg import lsqr as _lsqr
+import scipy.linalg as _linalg
+from scipy.optimize import minimize as _minimize
+from tqdm.auto import tqdm as _tqdm
 
 def basis_to_xarray(basis, dims, coords, attrs=None, name=None):
     """
@@ -32,7 +33,7 @@ def basis_to_xarray(basis, dims, coords, attrs=None, name=None):
         DataArray name
     """
     shape = [coords[dim].size for dim in dims]
-    array = xr.DataArray(data=basis.T.reshape(shape), dims=dims, coords=coords, attrs=attrs, name=name)
+    array = _xr.DataArray(data=basis.T.reshape(shape), dims=dims, coords=coords, attrs=attrs, name=name)
     return array
 
 def orthogonal_projection(vectors, subspace):
@@ -51,7 +52,7 @@ def orthogonal_projection(vectors, subspace):
     projection: np.array
         An array with the vectors projection onto the subspace
     """
-    return np.matmul(subspace, np.matmul(subspace.T, vectors))
+    return _np.matmul(subspace, _np.matmul(subspace.T, vectors))
 
 def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
     """
@@ -144,32 +145,32 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
         # Transform to numpy arrays
         grf_fullrank = grf_fullrank.linalg.to_basis('sample')
         random_sources = random_sources.linalg.to_basis('sample')
-        grf_mean_energy = np.mean(np.linalg.norm(grf_fullrank, axis=0) ** 2)
+        grf_mean_energy = _np.mean(_np.linalg.norm(grf_fullrank, axis=0) ** 2)
 
     solver.reseed(printval=False)
     basis = solver.sample_source(num_samples=blocksize)
     residual = {'mean': [], 'std': []}
-    loop = tqdm(range(maxiter), desc='subspace iteration') if verbose else range(maxiter)
+    loop = _tqdm(range(maxiter), desc='subspace iteration') if verbose else range(maxiter)
     for iter in loop:
         basis = rsi_iteration(solver, basis, deflation_subspace, n_jobs)
 
         # Adaptive convergence criteria based on test GRF statistics.
         if (num_test_grfs > 0):
-            u, s, v = scipy.linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
-            grf_lowrank = np.matmul(u * s, np.matmul(u.T, random_sources))
-            residual_samples = np.linalg.norm(grf_lowrank - grf_fullrank, axis=0) ** 2 / grf_mean_energy
-            residual['mean'].append(np.mean(residual_samples))
-            residual['std'].append(np.std(residual_samples))
+            u, s, v = _linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
+            grf_lowrank = _np.matmul(u * s, _np.matmul(u.T, random_sources))
+            residual_samples = _np.linalg.norm(grf_lowrank - grf_fullrank, axis=0) ** 2 / grf_mean_energy
+            residual['mean'].append(_np.mean(residual_samples))
+            residual['std'].append(_np.std(residual_samples))
 
-            if (len(residual['mean']) > 2) and (np.abs(residual['mean'][-1] - residual['mean'][-2]) < tol) and \
-                    (np.abs(residual['std'][-1] - residual['std'])[-2] < tol):
+            if (len(residual['mean']) > 2) and (_np.abs(residual['mean'][-1] - residual['mean'][-2]) < tol) and \
+                    (_np.abs(residual['std'][-1] - residual['std'])[-2] < tol):
                 if verbose:
                     print('RSI converged with residual_mean = {:1.3f} ; residual_std = {:1.3f}'.format(
                           residual['mean'][-1], residual['std'][-1]))
                 break
 
     if (num_test_grfs == 0):
-        u, s, v = scipy.linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
+        u, s, v = _linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
 
     # Eigenvectors
     eigenvectors = basis_to_xarray(u, basis.dims, basis.coords, basis.attrs, name='eigenvectors')
@@ -177,9 +178,9 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
 
     # Eigenvalues
     degrees = range(deflation_degree, deflation_degree + basis.sample.size)
-    eigenvalues = xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
+    eigenvalues = _xr.DataArray(s, dims='degree', coords={'degree': degrees}, name='eigenvalues')
 
-    modes = xr.merge([eigenvectors, eigenvalues])
+    modes = _xr.merge([eigenvectors, eigenvalues])
     modes.attrs.update(
         blocksize=blocksize,
         maxiter=maxiter,
@@ -190,10 +191,10 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
     )
 
     if (num_test_grfs > 0):
-        residuals = xr.Dataset(data_vars={'mean': ('iteration', residual['mean']),
+        residuals = _xr.Dataset(data_vars={'mean': ('iteration', residual['mean']),
                                          'std': ('iteration', residual['std'])},
-                              coords={'iteration': np.array(range(iter+1))+1},
-                              attrs=modes.attrs)
+                                coords={'iteration': _np.array(range(iter + 1)) + 1},
+                                attrs=modes.attrs)
         modes.attrs.update(residual_mean=float(residuals['mean'].isel(iteration=-1)),
                            residual_std=float(residuals['std'].isel(iteration=-1)),)
         output = (modes, residuals)
@@ -238,7 +239,7 @@ def projection_residual(vector, subspace, damp=0.0, return_projection=False, ret
     """
     projection_matrix = subspace.linalg.to_basis(vector_dim='degree')
     result = lsqr_projection(vector, projection_matrix, damp, return_projection, return_coefs)
-    residual = xr.Dataset(data_vars={'data':result[0], 'total':result[1]}, attrs={'damp': damp})
+    residual = _xr.Dataset(data_vars={'data':result[0], 'total':result[1]}, attrs={'damp': damp})
 
     # Expand dataset coordinates which are not: 'degree', 't', 'y', 'x'
     dim_names = list(set(subspace.coords) - set(['degree', 't', 'y', 'x']))
@@ -249,7 +250,7 @@ def projection_residual(vector, subspace, damp=0.0, return_projection=False, ret
     if return_projection:
         output = (residual, result[2])
     if return_coefs:
-        coefs = xr.DataArray(result[-1], coords={'degree': subspace['degree']}, dims='degree')
+        coefs = _xr.DataArray(result[-1], coords={'degree': subspace['degree']}, dims='degree')
         output = (residual, coefs) if return_projection is False else output + (coefs,)
     return output
 
@@ -282,39 +283,39 @@ def lsqr_projection(b, A, damp=0.0, return_projection=False, return_coefs=False,
             - projection is an xr.DataArray (if b is a DataArray) with the projected vector
             - coefs is a numpy array with the projection coefficients
     """
-    y_array = np.array(b).ravel()
+    y_array = _np.array(b).ravel()
     meas_length = b.size
-    y_mask = np.isfinite(y_array)
-    A_mask = np.isfinite(A)
+    y_mask = _np.isfinite(y_array)
+    A_mask = _np.isfinite(A)
 
-    projection = np.full_like(y_array, fill_value=np.nan)
+    projection = _np.full_like(y_array, fill_value=_np.nan)
 
     size_diff = None
     if meas_length < A.shape[0]:
-        y_array = np.concatenate((y_array, np.zeros(A.shape[0] - meas_length)))
-        y_mask = np.concatenate((y_mask, np.ones(A.shape[0] - meas_length, dtype=np.bool)))
+        y_array = _np.concatenate((y_array, _np.zeros(A.shape[0] - meas_length)))
+        y_mask = _np.concatenate((y_mask, _np.ones(A.shape[0] - meas_length, dtype=_np.bool)))
         size_diff = meas_length - A.shape[0]
 
-    assert np.equal(A_mask, y_mask[:, None]).all(), "Masks of A matrix and b are not identical"
+    assert _np.equal(A_mask, y_mask[:, None]).all(), "Masks of A matrix and b are not identical"
 
     A = A[A_mask].reshape(-1, A.shape[-1])
     y_array = y_array[y_mask]
 
     if (real_estimation) and b.dtype == 'complex':
         r2, coefs = lsqr_real(b, A, damp)
-        projection[y_mask[:meas_length]] = np.dot(A[:size_diff], coefs)
+        projection[y_mask[:meas_length]] = _np.dot(A[:size_diff], coefs)
         projection = projection.reshape(*b.shape)
-        r1 = np.linalg.norm(b - projection) ** 2
+        r1 = _np.linalg.norm(b - projection) ** 2
     else:
-        out = lsqr(A, y_array, damp=damp)
+        out = _lsqr(A, y_array, damp=damp)
         coefs, r1, r2 = out[0], out[3]**2, out[4]**2
 
     output = (r1, r2)
     if return_projection:
-        projection[y_mask[:meas_length]] = np.dot(A[:size_diff], coefs)
+        projection[y_mask[:meas_length]] = _np.dot(A[:size_diff], coefs)
         projection = projection.reshape(*b.shape)
-        if isinstance(b, xr.DataArray):
-            projection = xr.DataArray(projection, coords=b.coords)
+        if isinstance(b, _xr.DataArray):
+            projection = _xr.DataArray(projection, coords=b.coords)
         output += (projection,)
     if return_coefs:
         output += (coefs,)
@@ -349,13 +350,13 @@ def lsqr_real(b, A, damp=0.0):
     ----------
     [1] https://docs.scipy.org/doc/scipy-1.1.0/reference/optimize.minimize-lbfgsb.html
     """
-    l2_loss = lambda x: np.linalg.norm(b - A.dot(x))**2 + np.linalg.norm(damp*x)**2
-    l2_grad = lambda x: 2*np.ascontiguousarray(np.real(A.conj().T.dot(A.dot(x) - b)) - (damp**2) * x)
-    out = scipy.optimize.minimize(l2_loss, jac=l2_grad, method='L-BFGS-B', x0=np.zeros(A.shape[-1], dtype=np.float64))
+    l2_loss = lambda x: _np.linalg.norm(b - A.dot(x)) ** 2 + _np.linalg.norm(damp * x) ** 2
+    l2_grad = lambda x: 2 * _np.ascontiguousarray(_np.real(A.conj().T.dot(A.dot(x) - b)) - (damp ** 2) * x)
+    out = _minimize(l2_loss, jac=l2_grad, method='L-BFGS-B', x0=_np.zeros(A.shape[-1], dtype=_np.float64))
     return out['fun'], out['x']
 
-@xr.register_dataarray_accessor("linalg")
-class LinearAlgebraAccessor(object):
+@_xr.register_dataarray_accessor("linalg")
+class _LinearAlgebraAccessor(object):
     """
     Register a custom accessor LinearAlgebraAccessor on xarray.DataArray object.
     This adds methods for linear algebra computations.
@@ -398,6 +399,6 @@ class LinearAlgebraAccessor(object):
         basis: xr.DataArray
             A DataArray with the orthogonalized subspace
         """
-        q, r = scipy.linalg.qr(self._obj.linalg.to_basis(orthogonal_dim), mode='economic', overwrite_a=True)
+        q, r = _linalg.qr(self._obj.linalg.to_basis(orthogonal_dim), mode='economic', overwrite_a=True)
         basis = basis_to_xarray(q, self._obj.dims, self._obj.coords, self._obj.attrs)
         return basis

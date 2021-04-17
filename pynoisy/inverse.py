@@ -9,14 +9,14 @@ References
     url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 .. [2] eht-imaging: https://github.com/achael/eht-imaging
 """
-import numpy as np
-import xarray as xr
-import pynoisy.linalg
-import matplotlib.pyplot as plt
-import gc
-from pynoisy.utils import mode_map
+import numpy as _np
+import xarray as _xr
+import gc as _gc
+import matplotlib.pyplot as _plt
+import pynoisy.linalg as _linalg
+import pynoisy.utils as _utils 
 
-@mode_map('Dataset', ['total', 'data'])
+@_utils.mode_map('Dataset', ['total', 'data'])
 def compute_pixel_loss(modes, measurements, damp=0.0):
     """
     Compute projection residual of the *direct pixel measurements* onto the subspace.
@@ -45,17 +45,17 @@ def compute_pixel_loss(modes, measurements, damp=0.0):
     To avoid memory overload subspace is deleted and garbage collected.
     """
     subspace = modes.eigenvalues * modes.eigenvectors
-    subspace = subspace.where(np.isfinite(measurements))
-    loss = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp)
+    subspace = subspace.where(_np.isfinite(measurements))
+    loss = _linalg.projection_residual(measurements, subspace, damp=damp)
 
     # Release memory
     del subspace
-    gc.collect()
+    _gc.collect()
 
     return loss
 
-@xr.register_dataarray_accessor("loss")
-class LossAccessor(object):
+@_xr.register_dataarray_accessor("loss")
+class _LossAccessor(object):
     """
     Register a custom accessor LossAccessor on xarray.DataArray object.
     This adds methods for processing and visualization of loss manifolds.
@@ -102,7 +102,7 @@ class LossAccessor(object):
             raise AttributeError('Loss curve should have dimension 1.')
 
         if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            fig, ax = _plt.subplots(1, 1, figsize=figsize)
 
         data.plot(ax=ax, color=color)
         dims = data.dims
@@ -113,7 +113,7 @@ class LossAccessor(object):
         ax.set_title('Residual Loss', fontsize=fontsize)
         ax.set_xlabel(dims[0])
         ax.set_xlim([float(data[dims[0]].min()), float(data[dims[0]].max())])
-        plt.tight_layout()
+        _plt.tight_layout()
 
     def plot2d(self, true=None, ax=None, figsize=(5,4), contours=False, rasterized=False, vmax=None,
                cmap=None, fontsize=16, linewidth=2.5, s=100, true_color='w', minimum_color='r'):
@@ -155,7 +155,7 @@ class LossAccessor(object):
             raise AttributeError('Loss manifold has dimension different than 2')
 
         if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            fig, ax = _plt.subplots(1, 1, figsize=figsize)
 
         data.plot(ax=ax, rasterized=rasterized, vmax=vmax, cmap=cmap)
         minimum = data.loss.argmin()
@@ -178,7 +178,7 @@ class LossAccessor(object):
 
                 # Plot a point for the true value
                 elif (len(dim_value) == 2):
-                    dim_value = np.array(dim_value)[np.argsort(dim_index)]
+                    dim_value = _np.array(dim_value)[_np.argsort(dim_index)]
                     ax.scatter(dim_value[1], dim_value[0], s=s, c=true_color, marker='^', label='True')
 
                 else:
@@ -192,4 +192,4 @@ class LossAccessor(object):
 
         ax.legend(facecolor='white', framealpha=0.4)
         ax.set_title('Residual Loss', fontsize=fontsize)
-        plt.tight_layout()
+        _plt.tight_layout()

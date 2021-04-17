@@ -22,6 +22,13 @@ import pynoisy.utils
 import pynoisy.linalg
 import pynoisy.visualization
 
+# Try to import observation modules (requires eht-imaging)
+import warnings as _warnings
+try:
+    import pynoisy.observation
+except ImportError:
+    _warnings.warn('Importing observation modules failed.')
+
 # Add inoisy executables directory to path
 import os
 os.environ['PATH'] = os.environ['INOISY_DIR'] + ':' + os.environ['PATH']

@@ -6,17 +6,17 @@ References
 ----------
 .. [1] eht-imaging: https://github.com/achael/eht-imaging
 """
-import xarray as xr
-import numpy as np
-import scipy.ndimage as nd
-import warnings
-import ehtim as eh
-import ehtim.const_def as ehc
-from functools import wraps
-from pynoisy.utils import aggregate_kwargs
+import xarray as _xr
+import numpy as _np
+import scipy.ndimage as _nd
+import warnings as _warnings
+from functools import wraps as _wraps
+import ehtim as _eh
+import ehtim.const_def as _ehc
+import pynoisy.utils as _utils
 
-@xr.register_dataarray_accessor("observe")
-class ObserveAccessor(object):
+@_xr.register_dataarray_accessor("observe")
+class _ObserveAccessor(object):
     """
     Register a custom accessor ObserveAccessor on xarray.DataArray object.
     This adds methods for interfacing with eht-imaging classes and methods and computing Fourier domain quantities.
@@ -32,10 +32,10 @@ class ObserveAccessor(object):
         -------
         wrapper: pynoisy.observation.check_time_units,
         """
-        @wraps(observe_fn)
+        @_wraps(observe_fn)
         def wrapper(*args, **kwargs):
             if ('t' in args[0]._obj.coords) and (args[0]._obj['t'].units != 'UTC hr'):
-                warnings.warn('Units on dim "t" are not recognized, should be "UTC hr"')
+                _warnings.warn('Units on dim "t" are not recognized, should be "UTC hr"')
             output = observe_fn(*args, **kwargs)
             return output
         return wrapper
@@ -48,18 +48,18 @@ class ObserveAccessor(object):
         -------
         wrapper: pynoisy.observation.check_image_units,
         """
-        @wraps(observe_fn)
+        @_wraps(observe_fn)
         def wrapper(*args, **kwargs):
             # Convert image dimensions into radian units
-            kwargs = aggregate_kwargs(observe_fn, *args, **kwargs)
-            rad_unit_conversion = {'rad': 1.0, 'as': ehc.RADPERUAS, 'uas': ehc.RADPERUAS}
+            kwargs = _utils.aggregate_kwargs(observe_fn, *args, **kwargs)
+            rad_unit_conversion = {'rad': 1.0, 'as': _ehc.RADPERUAS, 'uas': _ehc.RADPERUAS}
             for dim in kwargs['image_dims']:
                 dim_units = args[0]._obj[dim].units
                 if (dim_units == 'rad') or (dim_units == 'as') or (dim_units == 'uas'):
-                    args[0]._obj[dim] = xr.DataArray(args[0]._obj[dim] * rad_unit_conversion[dim_units],
-                                                     attrs={'units': 'rad'})
+                    args[0]._obj[dim] = _xr.DataArray(args[0]._obj[dim] * rad_unit_conversion[dim_units],
+                                                      attrs={'units': 'rad'})
                 else:
-                    warnings.warn(
+                    _warnings.warn(
                         'Units on dim {} not recognized (should be rad/as/uas). Assuming rad units'.format(dim))
             output = observe_fn(**kwargs)
             return output
@@ -144,9 +144,9 @@ class ObserveAccessor(object):
         fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
 
         obslist = obs.tlist()
-        u = np.concatenate([obsdata['u'] for obsdata in obslist])
-        v = np.concatenate([obsdata['v'] for obsdata in obslist])
-        t = np.concatenate([obsdata['time'] for obsdata in obslist])
+        u = _np.concatenate([obsdata['u'] for obsdata in obslist])
+        v = _np.concatenate([obsdata['v'] for obsdata in obslist])
+        t = _np.concatenate([obsdata['time'] for obsdata in obslist])
 
         # Extra phase to match centroid convention
         pulsefac = fft.fourier._trianglePulse2D(u, v, psize, fft_dims)
@@ -154,33 +154,33 @@ class ObserveAccessor(object):
 
         fft = fft.assign_coords(u2=(fft_dims[0], range(fft[fft_dims[0]].size)),
                                 v2=(fft_dims[1], range(fft[fft_dims[1]].size)))
-        tuv2 = np.vstack((fft.v2.interp({fft_dims[1]: v}), fft.u2.interp({fft_dims[0]: u})))
+        tuv2 = _np.vstack((fft.v2.interp({fft_dims[1]: v}), fft.u2.interp({fft_dims[0]: u})))
 
         if 't' in fft.coords:
             fft = fft.assign_coords(t2=('t', range(fft.t.size)))
-            tuv2 = np.vstack((fft.t2.interp(t=t), tuv2))
+            tuv2 = _np.vstack((fft.t2.interp(t=t), tuv2))
 
         if (fft.ndim == 2) or (fft.ndim == 3):
-            visre = nd.map_coordinates(np.ascontiguousarray(np.real(fft).data), tuv2)
-            visim = nd.map_coordinates(np.ascontiguousarray(np.imag(fft).data), tuv2)
+            visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fft).data), tuv2)
+            visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fft).data), tuv2)
             vis = visre + 1j * visim
-            visibilities = xr.DataArray(vis * phase * pulsefac, dims='index')
+            visibilities = _xr.DataArray(vis * phase * pulsefac, dims='index')
 
         elif fft.ndim == 4:
             # Sample block Fourier on tuv coordinates of the observations
             # Note: using np.ascontiguousarray preforms ~twice as fast
             num_block = fft.shape[0]
             num_vis = len(t)
-            visibilities = np.empty(shape=(num_block, num_vis), dtype=np.complex128)
+            visibilities = _np.empty(shape=(num_block, num_vis), dtype=_np.complex128)
             for i, fourier in enumerate(fft):
-                visre = nd.map_coordinates(np.ascontiguousarray(np.real(fourier).data), tuv2)
-                visim = nd.map_coordinates(np.ascontiguousarray(np.imag(fourier).data), tuv2)
+                visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fourier).data), tuv2)
+                visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fourier).data), tuv2)
                 vis = visre + 1j * visim
                 visibilities[i] = vis * phase * pulsefac
 
-            visibilities = xr.DataArray(visibilities,
-                                        dims=[movies.dims[0], 'index'],
-                                        coords={movies.dims[0]: movies.coords[movies.dims[0]],
+            visibilities = _xr.DataArray(visibilities,
+                                         dims=[movies.dims[0], 'index'],
+                                         coords={movies.dims[0]: movies.coords[movies.dims[0]],
                                                 'index': range(num_vis)})
         else:
             raise ValueError("unsupported number of dimensions: {}".format(fft.ndim))
@@ -223,14 +223,14 @@ class ObserveAccessor(object):
         if 't' in movie.dims:
             for i, time in enumerate(movie.t):
                 frame = movie.isel(t=i)
-                image = eh.image.make_empty(frame.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
-                                            source=source)
+                image = _eh.image.make_empty(frame.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
+                                             source=source)
                 image.time = float(time)
                 image.ivec = frame.data.ravel()
                 im_list.append(image)
-            output = eh.movie.merge_im_list(im_list)
+            output = _eh.movie.merge_im_list(im_list)
         else:
-            output = eh.image.make_empty(movie.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
-                                        source=source)
+            output = _eh.image.make_empty(movie.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
+                                          source=source)
             output.ivec = movie.data.ravel()
         return output

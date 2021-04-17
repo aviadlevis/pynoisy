@@ -9,11 +9,11 @@ References
     The Astrophysical Journal, 906(1), p.39.
     url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 """
-import numpy as np
-import xarray as xr
-import pynoisy.utils
+import numpy as _np
+import xarray as _xr
+import pynoisy.utils as _utils
 
-def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
+def general_xy(ny, nx, opening_angle=_np.pi / 2 - _np.pi / 9, tau=1.0, lam=5.0, tensor_ratio=0.1, r_cutoff=0.5,
                grid_start=(-10, -10), grid_end=(10, 10), units='GM/c^2'):
     """
     Diffusion fields defined by the general_xy model [1].
@@ -54,12 +54,12 @@ def general_xy(ny, nx, opening_angle=np.pi/2 - np.pi/9, tau=1.0, lam=5.0, tensor
     ----------
     .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
-    grid = pynoisy.utils.linspace_2d((ny, nx), grid_start, grid_end, units=units)
+    grid = _utils.linspace_2d((ny, nx), grid_start, grid_end, units=units)
     correlation_time = general_xy_correlation_time(grid.r, tau, r_cutoff)
     correlation_length = general_xy_correlation_length(grid.r, lam, r_cutoff)
     spatial_angle = general_xy_spatial_angle(grid.theta, opening_angle)
 
-    diffusion = xr.Dataset(
+    diffusion = _xr.Dataset(
         data_vars={
             'spatial_angle': (['y', 'x'], spatial_angle),
             'correlation_time': (['y', 'x'], correlation_time),
@@ -131,11 +131,11 @@ def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
     ----------
     https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L169
     """
-    correlation_time = 2.0 * np.pi * tau / np.abs(r.polar.w_keplerian(r_cutoff))
+    correlation_time = 2.0 * _np.pi * tau / _np.abs(r.polar.w_keplerian(r_cutoff))
     if r_cutoff > 0.0:
         correlation_time.values[(r < r_cutoff).data] = correlation_time.polar.r_cutoff(
-            r_cutoff, 2 * np.pi * tau * r_cutoff ** 1.5, 2 * np.pi * tau * 1.5 * np.sqrt(r_cutoff),
-                      0.9 * 2 * np.pi * tau * r_cutoff ** 1.5).values[(r < r_cutoff).data]
+            r_cutoff, 2 * _np.pi * tau * r_cutoff ** 1.5, 2 * _np.pi * tau * 1.5 * _np.sqrt(r_cutoff),
+                      0.9 * 2 * _np.pi * tau * r_cutoff ** 1.5).values[(r < r_cutoff).data]
     correlation_time.name = 'correlation_time'
     correlation_time.attrs.update({
         'tau': tau,
@@ -143,7 +143,7 @@ def general_xy_correlation_time(r, tau=1.0, r_cutoff=0.5):
     })
     return correlation_time
 
-def general_xy_spatial_angle(theta, opening_angle=np.pi/2 - np.pi/9):
+def general_xy_spatial_angle(theta, opening_angle=_np.pi / 2 - _np.pi / 9):
     """
     Compute angle of spatial correlation on a grid according to general_xy.
     Source: inoisy/src/param_general_xy.c

@@ -9,14 +9,15 @@ References
     url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 .. [2] url: https://github.com/hypre-space/hypre
 """
-import xarray as xr
-import numpy as np
-from joblib import Parallel, delayed
-import warnings
-import subprocess
-import os, tempfile, time
-from scipy.special import gamma
-from os import getpid
+import xarray as _xr
+import numpy as _np
+from joblib import Parallel as _Parallel, delayed as _delayed
+import warnings as _warnings
+import subprocess as _subprocess
+import os as _os
+import tempfile as _tempfile
+import time as _time
+from scipy.special import gamma as _gamma
 
 class HGRFSolver(object):
     solver_list = ['PCG', 'SMG']
@@ -66,17 +67,17 @@ class HGRFSolver(object):
         .. [4] url: https://hypre.readthedocs.io/en/latest/ch-solvers.html
         """
         # Check input parameters
-        if not(np.allclose(advection.coords['x'] , diffusion.coords['x']) and \
-                np.allclose(advection.coords['y'] , diffusion.coords['y'])):
+        if not(_np.allclose(advection.coords['x'] , diffusion.coords['x']) and \
+               _np.allclose(advection.coords['y'] , diffusion.coords['y'])):
             raise NotImplementedError('different coordinates for diffusion and advection not implemented')
         if solver_type not in self.solver_list:
             raise AttributeError('Not supported solver type: {}'.format(solver_type))
-        if not np.log2(nt).is_integer():
-            warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
+        if not _np.log2(nt).is_integer():
+            _warnings.warn("Warning: number of frames is not a power(2), this is suboptimal")
 
         self.advection = advection
         self.diffusion = diffusion
-        self.params = xr.Dataset({
+        self.params = _xr.Dataset({
             'nt': nt,
             'evolution_length': evolution_length,
             't_units': t_units,
@@ -88,13 +89,13 @@ class HGRFSolver(object):
             'num_solvers': num_solvers
         })
         if seed is None:
-            self.reseed()
+            self.reseed(printval=False)
 
-        self._param_file = tempfile.NamedTemporaryFile(suffix='.h5')
-        self._src_file = tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else \
-            [tempfile.NamedTemporaryFile(suffix='.h5') for _ in range(num_solvers)]
-        self._output_file = tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else \
-            [tempfile.NamedTemporaryFile(suffix='.h5') for _ in range(num_solvers)]
+        self._param_file = _tempfile.NamedTemporaryFile(suffix='.h5')
+        self._src_file = _tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else \
+            [_tempfile.NamedTemporaryFile(suffix='.h5') for _ in range(num_solvers)]
+        self._output_file = _tempfile.NamedTemporaryFile(suffix='.h5') if num_solvers == 1 else \
+            [_tempfile.NamedTemporaryFile(suffix='.h5') for _ in range(num_solvers)]
 
     def __del__(self):
         """
@@ -117,8 +118,8 @@ class HGRFSolver(object):
         -----
         The seed is stored in self.params['seed'].
         """
-        np.random.seed(hash(time.time()) % 4294967295)
-        self.params['seed'] = np.random.randint(0, 32767) if seed is None else seed
+        _np.random.seed(hash(_time.time()) % 4294967295)
+        self.params['seed'] = _np.random.randint(0, 32767) if seed is None else seed
         if printval:
             print('Setting solver seed to: {}'.format(self.seed))
 
@@ -165,9 +166,9 @@ class HGRFSolver(object):
             Random Gaussian source DataArray with dimensions ['sample', 't', 'y', 'x']
         """
         seed = self.seed if seed is None else seed
-        np.random.seed(seed)
-        source = xr.DataArray(
-            data=np.random.randn(num_samples, self.nt, self.ny, self.nx) * self.forcing_strength,
+        _np.random.seed(seed)
+        source = _xr.DataArray(
+            data=_np.random.randn(num_samples, self.nt, self.ny, self.nx) * self.forcing_strength,
             coords={'sample': range(num_samples),  't': self.t, 'y': self.y, 'x': self.x},
             dims=['sample', 't', 'y', 'x'],
             attrs = {'seed': seed}
@@ -244,7 +245,7 @@ class HGRFSolver(object):
             if (source.sizes['t'] != self.nt):
                 raise AttributeError('Input source has different number of frames to solver: {} != {}.'.format(
                     source.sizes['t'], self.nt))
-            if not np.allclose(source.t, self.t):
+            if not _np.allclose(source.t, self.t):
                 raise AttributeError('Input source temporal grid is different to solver temporal grid.')
 
         # Save parameters to file (loaded within HYPRE)
@@ -270,31 +271,31 @@ class HGRFSolver(object):
         source = source.transpose('sample', 't', 'x', 'y')
 
         if self.params.num_solvers == 1:
-            output_dir = os.path.dirname(self._output_file.name)
-            output_filename = os.path.relpath(self._output_file.name, output_dir)
+            output_dir = _os.path.dirname(self._output_file.name)
+            output_filename = _os.path.relpath(self._output_file.name, output_dir)
             cmd.extend(['-source', self._src_file.name, '-output', output_dir, '-filename', output_filename])
             output = []
             for sample in range(source.sample.size):
                 source.sel(sample=sample).to_dataset(name='data_raw').to_netcdf(self._src_file.name, group='data', mode='w')
-                subprocess.run(cmd)
-                output.append((sample, xr.load_dataset(self._output_file.name, group='data')))
+                _subprocess.run(cmd)
+                output.append((sample, _xr.load_dataset(self._output_file.name, group='data')))
 
         # Parallel processing: this is a parallelization layer on top of the MPI.
         # i.e. multiple solvers each splitting the medium according to n_jobs
         elif self.params.num_solvers > 1:
 
             def _parallel_run(cmd, source, sample, input_names, output_names, n_jobs):
-                file_id = np.mod(getpid(), n_jobs)
-                output_dir = os.path.dirname(output_names[file_id])
-                output_filename = os.path.relpath(output_names[file_id], output_dir)
+                file_id = _np.mod(_os.getpid(), n_jobs)
+                output_dir = _os.path.dirname(output_names[file_id])
+                output_filename = _os.path.relpath(output_names[file_id], output_dir)
                 cmd.extend(['-source', input_names[file_id], '-output', output_dir, '-filename', output_filename])
                 source.to_dataset(name='data_raw').to_netcdf(input_names[file_id], group='data', mode='w')
-                subprocess.run(cmd)
-                output = xr.load_dataset(output_names[file_id], group='data')
+                _subprocess.run(cmd)
+                output = _xr.load_dataset(output_names[file_id], group='data')
                 return (sample, output)
 
-            output = Parallel(n_jobs=int(self.params.num_solvers))(
-                delayed(_parallel_run)(
+            output = _Parallel(n_jobs=int(self.params.num_solvers))(
+                _delayed(_parallel_run)(
                     cmd, source.isel(sample=sample), sample,
                     input_names=[file.name for file in self._src_file],
                     output_names=[file.name for file in self._output_file],
@@ -315,14 +316,14 @@ class HGRFSolver(object):
 
         for sample, pixels in output:
             movies = [
-                xr.DataArray(pixels['step_{}'.format(deg)].data, coords=coords, dims=dims, attrs=attrs).assign_coords(
+                _xr.DataArray(pixels['step_{}'.format(deg)].data, coords=coords, dims=dims, attrs=attrs).assign_coords(
                     deg=deg + 1, sample=sample) for deg in range(nrecur - 1)
             ]
-            final_movie = xr.DataArray(data=pixels.data_raw.data, coords=coords, dims=dims, attrs=attrs)
+            final_movie = _xr.DataArray(data=pixels.data_raw.data, coords=coords, dims=dims, attrs=attrs)
             final_movie = final_movie.assign_coords(deg=nrecur, sample=sample)
             movies.append(final_movie)
-            output[sample] = xr.concat(movies, dim='deg')
-        output = xr.concat(output, dim='sample')
+            output[sample] = _xr.concat(movies, dim='deg')
+        output = _xr.concat(output, dim='sample')
 
         if (nrecur == 1):
             output = output.squeeze('deg').drop_vars('deg')
@@ -345,9 +346,9 @@ class HGRFSolver(object):
         threshold: float, default=1e-10
             Clip the scale factor to a minimal value.
         """
-        factor = (4. * np.pi) ** (3. / 2.) * gamma(2. * nrecur) / gamma(2. * nrecur - 3. / 2.)
-        return np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
-                       self.diffusion.correlation_length ** 2).clip(min=threshold)
+        factor = (4. * _np.pi) ** (3. / 2.) * _gamma(2. * nrecur) / _gamma(2. * nrecur - 3. / 2.)
+        return _np.sqrt(factor * self.diffusion.tensor_ratio * self.diffusion.correlation_time *
+                        self.diffusion.correlation_length ** 2).clip(min=threshold)
 
     def _parallel_processing_cmd(self, n_jobs, nprocx, nprocy, nproct):
         """
@@ -368,9 +369,9 @@ class HGRFSolver(object):
         -----
         For positive nprocs the product should equal the number of jobs: nprox*nproxy*nproxt = n_jobs.
         """
-        assert np.mod(self.nx, nprocx) == 0, 'nx / nprocx should be an integer'
-        assert np.mod(self.ny, nprocy) == 0, 'ny / nprocy should be an integer'
-        assert np.mod(self.nt, nproct) == 0, 'nt / nproct should be an integer'
+        assert _np.mod(self.nx, nprocx) == 0, 'nx / nprocx should be an integer'
+        assert _np.mod(self.ny, nprocy) == 0, 'ny / nprocy should be an integer'
+        assert _np.mod(self.nt, nproct) == 0, 'nt / nproct should be an integer'
 
         if (nprocx == -1):
             assert (nprocy == 1) and (nproct == 1), 'nprocx is set to -1 with nprocy or nproct different than 1.'
@@ -383,7 +384,7 @@ class HGRFSolver(object):
             nproct = n_jobs
         elif (nprocx*nprocy*nproct != n_jobs):
             n_jobs = nprocx*nprocy*nproct
-            warnings.warn('n_jobs is overwritten by {}: n_jobs != nprocx*nprocy*nproct.'.format(n_jobs))
+            _warnings.warn('n_jobs is overwritten by {}: n_jobs != nprocx*nprocy*nproct.'.format(n_jobs))
 
         cmd = [
             '-ni', str(int(self.ny / nprocy)), '-nj', str(int(self.nx / nprocx)), '-nk',
@@ -410,9 +411,9 @@ class HGRFSolver(object):
         -----
         For saving see method to_netcdf.
         """
-        params = xr.load_dataset(path)
-        return cls(advection=xr.load_dataset(path, group='advection'),
-                   diffusion=xr.load_dataset(path, group='diffusion'),
+        params = _xr.load_dataset(path)
+        return cls(advection=_xr.load_dataset(path, group='advection'),
+                   diffusion=_xr.load_dataset(path, group='diffusion'),
                    forcing_strength=float(params.forcing_strength.data),
                    seed=int(params.seed.data),
                    num_solvers=int(params.num_solvers),
@@ -437,7 +438,7 @@ class HGRFSolver(object):
 
     @property
     def t(self):
-        return xr.DataArray(np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'units': self.t_units})
+        return _xr.DataArray(_np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'units': self.t_units})
 
     @property
     def nt(self):
@@ -465,7 +466,7 @@ class HGRFSolver(object):
 
     @property
     def v(self):
-        return np.stack([self.advection.vx, self.advection.vy], axis=-1)
+        return _np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
 def modulate(envelope, grf, alpha, keep_attrs=True):
     """
@@ -492,9 +493,9 @@ def modulate(envelope, grf, alpha, keep_attrs=True):
     -----
     Envelope and GRF image coordinates need to be identical.
     """
-    xr.testing.assert_equal(envelope['x'], grf['x'])
-    xr.testing.assert_equal(envelope['y'], grf['y'])
-    movie = np.exp(alpha * grf) * envelope
+    _xr.testing.assert_equal(envelope['x'], grf['x'])
+    _xr.testing.assert_equal(envelope['y'], grf['y'])
+    movie = _np.exp(alpha * grf) * envelope
     movie.attrs.update(alpha=alpha)
 
     if keep_attrs:

@@ -2,9 +2,11 @@
 Envelopes are static images which capture stationary features of the movie (e.g. black hole shadow).
 Simple geometric image structures are used to model the static envelope (e.g. ring, gaussian, disk etc..)
 """
-import numpy as np
-import xarray as xr
-import pynoisy.utils as utils
+import numpy as _np
+import xarray as _xr
+import pynoisy.utils as _utils
+
+__all__ = ["ring", "gaussian", "disk"]
 
 def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
          photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=1.0):
@@ -47,7 +49,7 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
            The Astrophysical Journal Letters, 885(2), p.L33. 2019.
            url: https://iopscience.iop.org/article/10.3847/2041-8213/ab518c/pdf
     """
-    grid = utils.linspace_2d((ny, nx), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
+    grid = _utils.linspace_2d((ny, nx), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
     r = grid.r.data
 
     zone0_radius = inner_radius
@@ -57,32 +59,32 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
     decay2 = inner_decay
     decay3 = outer_decay
 
-    zone0 = np.exp(-1.0 / ((r + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
+    zone0 = _np.exp(-1.0 / ((r + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
     zone0[r > zone0_radius] = 0
 
-    zone1 = (photon_ring_contrast + np.exp(-decay1 * (r - zone0_radius))) * np.exp(
+    zone1 = (photon_ring_contrast + _np.exp(-decay1 * (r - zone0_radius))) * _np.exp(
         -1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2)
     zone1[r <= zone0_radius] = 0
     zone1[r > zone1_radius] = 0
 
-    zone2 = np.exp(-decay2 * (r - zone1_radius)) * np.exp(
+    zone2 = _np.exp(-decay2 * (r - zone1_radius)) * _np.exp(
         -1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2) * \
-            (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
+            (photon_ring_contrast + _np.exp(-decay1 * (zone1_radius - zone0_radius)))
     zone2[r <= zone1_radius] = 0
 
     data = zone0 + zone1 + zone2
 
     if outer_radius < 1.0:
         data[r > outer_radius] = 0
-        zone3 = np.exp(-decay3 * (r - outer_radius)) * np.exp(-decay2 * (outer_radius - zone1_radius)) * \
-                np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2) * \
-                (photon_ring_contrast + np.exp(-decay1 * (zone1_radius - zone0_radius)))
+        zone3 = _np.exp(-decay3 * (r - outer_radius)) * _np.exp(-decay2 * (outer_radius - zone1_radius)) * \
+                _np.exp(-1.0 / ((zone0_radius + 1e-8) / (ascent * zone0_radius * 2)) ** 2) * \
+                (photon_ring_contrast + _np.exp(-decay1 * (zone1_radius - zone0_radius)))
         zone3[r <= outer_radius] = 0
         data += zone3
 
-    envelope = xr.DataArray(
+    envelope = _xr.DataArray(
         name='envelope',
-        data=np.array(data, dtype=np.float64, order='C'),
+        data=_np.array(data, dtype=_np.float64, order='C'),
         coords=grid.coords,
         dims=['y', 'x'],
         attrs={
@@ -125,17 +127,17 @@ def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
         An image DataArray with dimensions ['y', 'x'].
     """
     if fwhm is None:
-        fwhm = std * np.sqrt(2 * np.log(2)) * 2 / np.sqrt(2)
+        fwhm = std * _np.sqrt(2 * _np.log(2)) * 2 / _np.sqrt(2)
     else:
-        std = fwhm * np.sqrt(2) / (np.sqrt(2 * np.log(2)) * 2)
+        std = fwhm * _np.sqrt(2) / (_np.sqrt(2 * _np.log(2)) * 2)
 
-    grid = utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    grid = _utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
     r = grid.r.data
-    data = np.exp(-(r / std) ** 2)
+    data = _np.exp(-(r / std) ** 2)
 
-    envelope = xr.DataArray(
+    envelope = _xr.DataArray(
         name='envelope',
-        data=np.array(data, dtype=np.float64, order='C'),
+        data=_np.array(data, dtype=_np.float64, order='C'),
         coords=grid.coords,
         dims=['y', 'x'],
         attrs={
@@ -170,15 +172,15 @@ def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     envelope: xr.DataArray,
         An image DataArray with dimensions ['y', 'x'].
     """
-    grid = utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
-    data = utils.full_like(grid.coords, fill_value=1.0)
+    grid = _utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    data = _utils.full_like(grid.coords, fill_value=1.0)
     data.values[data.r >= .95 * radius] = 0
-    exponential_decay = np.exp(-decay * (data.r - .95 * radius))
+    exponential_decay = _np.exp(-decay * (data.r - .95 * radius))
     data += exponential_decay.where(data.r >= .95 * radius).fillna(0.0)
 
-    envelope = xr.DataArray(
+    envelope = _xr.DataArray(
         name='envelope',
-        data=np.array(data, dtype=np.float64, order='C'),
+        data=_np.array(data, dtype=_np.float64, order='C'),
         coords=grid.coords,
         dims=['y', 'x'],
         attrs={
