@@ -6,8 +6,6 @@ import numpy as _np
 import xarray as _xr
 import pynoisy.utils as _utils
 
-__all__ = ["ring", "gaussian", "disk"]
-
 def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
          photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=1.0):
     """

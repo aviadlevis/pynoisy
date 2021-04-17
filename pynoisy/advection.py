@@ -36,7 +36,7 @@ def general_xy(ny, nx, opening_angle=-_np.pi/2, r_cutoff=0.5, grid_start=(-10, -
     .. [1] inoisy code: https://github.com/AFD-Illinois/inoisy
     """
     grid = _utils.linspace_2d((ny, nx), grid_start, grid_end, units=units)
-    magnitude = _np.abs(grid.polar.w_keplerian(r_cutoff)) * grid.r
+    magnitude = _np.abs(grid.utils_polar.w_keplerian(r_cutoff)) * grid.r
     vy = magnitude * _np.sin(grid.theta + opening_angle)
     vx = magnitude * _np.cos(grid.theta + opening_angle)
 

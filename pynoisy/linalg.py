@@ -79,12 +79,12 @@ def rsi_iteration(solver, input_vectors, orthogonal_subspace=None, n_jobs=4):
         Note that these vectors are not orthogonal.
     """
     # Create an orthogonal basis from the input_vectors with QR decomposition
-    input_vectors = input_vectors.linalg.qr_orthogonalization('sample')
+    input_vectors = input_vectors.utils_linalg.qr_orthogonalization('sample')
     basis_xr = solver.run(source=input_vectors, n_jobs=n_jobs, verbose=0)
 
     # Orthogonalize against subspace with double MGS (Modified Grahm Schmidt)
     if orthogonal_subspace is not None:
-        basis = basis_xr.linalg.to_basis(vector_dim='sample')
+        basis = basis_xr.utils_linalg.to_basis(vector_dim='sample')
         basis = basis - orthogonal_projection(basis, orthogonal_subspace)
         basis = basis - orthogonal_projection(basis, orthogonal_subspace)
         basis_xr = basis_to_xarray(basis, basis_xr.dims, basis_xr.coords, basis_xr.attrs)
@@ -143,8 +143,8 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
         grf_fullrank = solver.run(source=random_sources, num_samples=num_test_grfs, verbose=0)
 
         # Transform to numpy arrays
-        grf_fullrank = grf_fullrank.linalg.to_basis('sample')
-        random_sources = random_sources.linalg.to_basis('sample')
+        grf_fullrank = grf_fullrank.utils_linalg.to_basis('sample')
+        random_sources = random_sources.utils_linalg.to_basis('sample')
         grf_mean_energy = _np.mean(_np.linalg.norm(grf_fullrank, axis=0) ** 2)
 
     solver.reseed(printval=False)
@@ -156,7 +156,7 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
 
         # Adaptive convergence criteria based on test GRF statistics.
         if (num_test_grfs > 0):
-            u, s, v = _linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
+            u, s, v = _linalg.svd(basis.utils_linalg.to_basis(vector_dim='sample'), full_matrices=False)
             grf_lowrank = _np.matmul(u * s, _np.matmul(u.T, random_sources))
             residual_samples = _np.linalg.norm(grf_lowrank - grf_fullrank, axis=0) ** 2 / grf_mean_energy
             residual['mean'].append(_np.mean(residual_samples))
@@ -170,7 +170,7 @@ def randomized_subspace(solver, blocksize, maxiter, deflation_subspace=None, n_j
                 break
 
     if (num_test_grfs == 0):
-        u, s, v = _linalg.svd(basis.linalg.to_basis(vector_dim='sample'), full_matrices=False)
+        u, s, v = _linalg.svd(basis.utils_linalg.to_basis(vector_dim='sample'), full_matrices=False)
 
     # Eigenvectors
     eigenvectors = basis_to_xarray(u, basis.dims, basis.coords, basis.attrs, name='eigenvectors')
@@ -237,7 +237,7 @@ def projection_residual(vector, subspace, damp=0.0, return_projection=False, ret
     -----
     The hard work is done by the function 'lsqr_projection'.
     """
-    projection_matrix = subspace.linalg.to_basis(vector_dim='degree')
+    projection_matrix = subspace.utils_linalg.to_basis(vector_dim='degree')
     result = lsqr_projection(vector, projection_matrix, damp, return_projection, return_coefs)
     residual = _xr.Dataset(data_vars={'data':result[0], 'total':result[1]}, attrs={'damp': damp})
 
@@ -355,7 +355,7 @@ def lsqr_real(b, A, damp=0.0):
     out = _minimize(l2_loss, jac=l2_grad, method='L-BFGS-B', x0=_np.zeros(A.shape[-1], dtype=_np.float64))
     return out['fun'], out['x']
 
-@_xr.register_dataarray_accessor("linalg")
+@_xr.register_dataarray_accessor("utils_linalg")
 class _LinearAlgebraAccessor(object):
     """
     Register a custom accessor LinearAlgebraAccessor on xarray.DataArray object.
@@ -399,6 +399,6 @@ class _LinearAlgebraAccessor(object):
         basis: xr.DataArray
             A DataArray with the orthogonalized subspace
         """
-        q, r = _linalg.qr(self._obj.linalg.to_basis(orthogonal_dim), mode='economic', overwrite_a=True)
+        q, r = _linalg.qr(self._obj.utils_linalg.to_basis(orthogonal_dim), mode='economic', overwrite_a=True)
         basis = basis_to_xarray(q, self._obj.dims, self._obj.coords, self._obj.attrs)
         return basis

@@ -44,7 +44,7 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True),
     grid = _xr.Dataset(coords={'y': y, 'x': x})
     grid.y.attrs.update(units=units)
     grid.x.attrs.update(units=units)
-    return grid.polar.add_coords()
+    return grid.utils_polar.add_coords()
 
 def full_like(coords, fill_value):
     """
@@ -318,7 +318,7 @@ class _FourierAccessor(object):
                                     image_dims[1]: (padvalx1, padvalx2)}, constant_values=0.0)
 
         # Compute visibilities (Fourier transform) of the entire block
-        psize = movies.image.psize
+        psize = movies.utils_image.psize
         freqs = _np.fft.fftshift(_np.fft.fftfreq(n=padded_movies[image_dims[0]].size, d=psize))
         fft = _np.fft.fftshift(_np.fft.fft2(_np.fft.ifftshift(padded_movies)))
 
@@ -342,7 +342,7 @@ class _FourierAccessor(object):
                              dims=self._obj.dims,
                              attrs=self._obj.attrs)
 
-@_xr.register_dataarray_accessor("movie")
+@_xr.register_dataarray_accessor("utils_movie")
 class _MovieAccessor(object):
     """
     Register a custom accessor MovieAccessor on xarray.DataArray object.
@@ -395,8 +395,8 @@ class _MovieAccessor(object):
         lightcurve = self._obj.sum(('y', 'x'))
         return lightcurve
 
-@_xr.register_dataset_accessor("image")
-@_xr.register_dataarray_accessor("image")
+@_xr.register_dataset_accessor("utils_image")
+@_xr.register_dataarray_accessor("utils_image")
 class _ImageAccessor(object):
     """
     Register a custom accessor ImageAccessor on xarray.DataArray and xarray.Dataset objects.
@@ -437,7 +437,7 @@ class _ImageAccessor(object):
 
         # Add polar coordinates if exist
         if ('r' in data.coords) or ('theta' in data.coords):
-            data = data.polar.add_coords()
+            data = data.utils_polar.add_coords()
         return data
 
     def regrid(self, num, image_dims=['y', 'x'], method='linear'):
@@ -460,9 +460,8 @@ class _ImageAccessor(object):
             A DataArray or Dataset regridded with a new spatial resolution.
         """
         units = self._obj[image_dims[0]].units if 'units' in self._obj[image_dims[0]].attrs else 'unitless'
-        grid = pynoisy.utils.linspace_2d(
-            num, (self._obj[image_dims[0]][0], self._obj[image_dims[1]][0]),
-            (self._obj[image_dims[0]][-1], self._obj[image_dims[1]][-1]))
+        grid = linspace_2d(num, (self._obj[image_dims[0]][0], self._obj[image_dims[1]][0]),
+                           (self._obj[image_dims[0]][-1], self._obj[image_dims[1]][-1]))
         output = self._obj.interp_like(grid,  method=method)
         for dim in image_dims:
             output[dim].attrs.update(units=units)
@@ -487,7 +486,7 @@ class _ImageAccessor(object):
         -----
         Assumes a symmetric fov across image dimensions
         """
-        psize = self._obj.image.fov[0] / self._obj[dim].size
+        psize = self._obj.utils_image.fov[0] / self._obj[dim].size
         return float(psize)
 
     @property
@@ -512,8 +511,8 @@ class _ImageAccessor(object):
         fov = self._obj[dim][-1] - self._obj[dim][0]
         return (float(fov), self._obj[dim].units)
 
-@_xr.register_dataset_accessor("polar")
-@_xr.register_dataarray_accessor("polar")
+@_xr.register_dataset_accessor("utils_polar")
+@_xr.register_dataarray_accessor("utils_polar")
 class _PolarAccessor(object):
     """
     Register a custom accessor PolarAccessor on xarray.DataArray and xarray.Dataset objects.
@@ -578,7 +577,7 @@ class _PolarAccessor(object):
         ----------
         https://github.com/aviadlevis/inoisy/blob/47fb41402ecdf93bfdd176fec780e8f0ba43445d/src/param_general_xy.c#L97
         """
-        output = self._obj if 'r' in self._obj.coords else self._obj.polar.add_coords()
+        output = self._obj if 'r' in self._obj.coords else self._obj.utils_polar.add_coords()
         r = output['r']
         b = (2. * (fr0 - f0) - r0 * dfr0) / r0 ** 3
         a = (fr0 - f0) / (b * r0 * r0) + r0
@@ -599,17 +598,17 @@ class _PolarAccessor(object):
             A DataArray of Keplerian orbital frequency on an x,y grid.
         """
         if 'r' not in self._obj.coords:
-            self._obj.polar.add_coords()
+            self._obj.utils_polar.add_coords()
         r = self._obj['r']
         w = r ** (-1.5)
         if r_cutoff > 0.0:
-            w.values[(r < r_cutoff).data] = w.polar.r_cutoff(r_cutoff, r_cutoff ** (-1.5), -1.5 * r_cutoff ** (-2.5),
+            w.values[(r < r_cutoff).data] = w.utils_polar.r_cutoff(r_cutoff, r_cutoff ** (-1.5), -1.5 * r_cutoff ** (-2.5),
                                                              0.9 * r_cutoff ** (-1.5)).values[(r < r_cutoff).data]
         w.name = 'w_keplerian'
         w.attrs.update(r_cutoff=r_cutoff)
         return w
 
-@_xr.register_dataset_accessor("tensor")
+@_xr.register_dataset_accessor("utils_tensor")
 class _TensorAccessor(object):
     """
     Register a custom accessor TensorAccessor on xarray.Dataset object.
@@ -632,7 +631,7 @@ class _TensorAccessor(object):
         advection: xr.Dataset
             A Dataset with velocity (vx, vy) on an x,y grid.
         """
-        previous_magnitude = self._obj.tensor.v_magnitude
+        previous_magnitude = self._obj.utils_tensor.v_magnitude
         self._obj['vy'] = (magnitude/previous_magnitude) * self._obj['vy']
         self._obj['vx'] = (magnitude/previous_magnitude) * self._obj['vx']
         return self._obj

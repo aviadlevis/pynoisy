@@ -170,8 +170,7 @@ def plot_mean_std(mean, std, x=None, ax=None, color='tab:blue', alpha=0.35):
     ax.fill_between(x, mean + std, mean - std, facecolor=color, alpha=alpha)
     ax.set_xlim([x[0], x[-1]])
 
-
-@_xr.register_dataarray_accessor("visualization")
+@_xr.register_dataarray_accessor("utils_visualization")
 class _VisualizationAccessor(object):
     """
     Register a custom accessor VisualizationAccessor on xarray.DataArray object.
@@ -291,7 +290,7 @@ class _VisualizationAccessor(object):
             anim.save(output, writer='imagemagick', fps=fps)
         return anim
 
-@_xr.register_dataset_accessor("visualization")
+@_xr.register_dataset_accessor("utils_visualization")
 class _VisualizationAccessor(object):
     """
     Register a custom accessor VisualizationAccessor on xarray.Dataset object.

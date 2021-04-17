@@ -468,6 +468,7 @@ class HGRFSolver(object):
     def v(self):
         return _np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
+
 def modulate(envelope, grf, alpha, keep_attrs=True):
     """
     Modulate an envelope by an exponential of the Gaussian Random Field (GRF):
@@ -493,8 +494,8 @@ def modulate(envelope, grf, alpha, keep_attrs=True):
     -----
     Envelope and GRF image coordinates need to be identical.
     """
-    _xr.testing.assert_equal(envelope['x'], grf['x'])
-    _xr.testing.assert_equal(envelope['y'], grf['y'])
+    _np.testing.assert_equal(envelope['x'].data, grf['x'].data)
+    _np.testing.assert_equal(envelope['y'].data, grf['y'].data)
     movie = _np.exp(alpha * grf) * envelope
     movie.attrs.update(alpha=alpha)
 

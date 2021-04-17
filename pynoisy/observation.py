@@ -15,7 +15,53 @@ import ehtim as _eh
 import ehtim.const_def as _ehc
 import pynoisy.utils as _utils
 
-@_xr.register_dataarray_accessor("observe")
+
+def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278148651123,
+                      ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850,
+                      bw=1856000000.0, timetype='UTC', polrep='stokes', source='SYNTHETIC'):
+    """
+    Generate synthetic ehtim.Observation from an array configuration and time constraints
+
+    Parameters
+    ----------
+    array: ehtim.Array
+        ehtim ehtim Array object (e.g. from: ehtim.array.load_txt(array_path))
+    nt: int,
+        Number of temporal frames.
+    tint: float,
+        Scan integration time in seconds
+    tstart: float, default=4.045833349227905
+        Start time of the observation in hours
+    tstop: float, default=15.465278148651123
+        End time of the observation in hours
+    ra: float, default=17.761121055553343,
+        Source Right Ascension in fractional hours.
+    dec: float, default=-29.00784305556,
+        Source declination in fractional degrees.
+    rf: float, default=226191789062.5,
+        Reference frequency observing at corresponding to 1.3 mm wavelength
+    mjd: int, default=57850,
+        Modified julian date of observation
+    bw: float, default=1856000000.0,
+    timetype: string, default='UTC',
+        How to interpret tstart and tstop; either 'GMST' or 'UTC'
+    polrep: sting, default='stokes',
+        Polarization representation, either 'stokes' or 'circ'
+    source: str, default='SYNTHETIC',
+        Source name
+
+    Returns
+    -------
+    obs: ehtim.Obsdata
+        ehtim Observation object
+    """
+    tadv = (tstop - tstart) * 3600.0 / nt
+    obs = array.obsdata(ra=ra, dec=dec, rf=rf, bw=bw, tint=tint, tadv=tadv, tstart=tstart, tstop=tstop, mjd=mjd,
+                        timetype=timetype, polrep=polrep)
+    obs.source = 'SYNTHETIC'
+    return obs
+
+@_xr.register_dataarray_accessor("utils_observe")
 class _ObserveAccessor(object):
     """
     Register a custom accessor ObserveAccessor on xarray.DataArray object.
@@ -93,14 +139,14 @@ class _ObserveAccessor(object):
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
         movies = self._obj
-        psize = movies.image.psize
+        psize = movies.utils_image.psize
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
         fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims)
         fft *= fft.fourier._trianglePulse2D(fft.u, fft.v, psize) * \
                fft.fourier._extra_phase(fft.u, fft.v, psize, image_dim_sizes)
 
         if ('r' in fft.coords) and ('theta' in fft.coords):
-            fft = fft.polar.add_coords(image_dims=['u', 'v'])
+            fft = fft.utils_polar.add_coords(image_dims=['u', 'v'])
         return fft
 
     @check_time_units
@@ -139,7 +185,7 @@ class _ObserveAccessor(object):
         fft_dims = ['u', 'v']
 
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
-        psize = movies.image.psize
+        psize = movies.utils_image.psize
 
         fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
 
@@ -223,14 +269,14 @@ class _ObserveAccessor(object):
         if 't' in movie.dims:
             for i, time in enumerate(movie.t):
                 frame = movie.isel(t=i)
-                image = _eh.image.make_empty(frame.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
+                image = _eh.image.make_empty(frame.sizes[image_dims[0]], movie.utils_image.fov[0], ra, dec, rf, mjd=mjd,
                                              source=source)
                 image.time = float(time)
                 image.ivec = frame.data.ravel()
                 im_list.append(image)
             output = _eh.movie.merge_im_list(im_list)
         else:
-            output = _eh.image.make_empty(movie.sizes[image_dims[0]], movie.image.fov[0], ra, dec, rf, mjd=mjd,
+            output = _eh.image.make_empty(movie.sizes[image_dims[0]], movie.utils_image.fov[0], ra, dec, rf, mjd=mjd,
                                           source=source)
             output.ivec = movie.data.ravel()
         return output

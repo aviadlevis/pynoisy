@@ -54,7 +54,7 @@ def compute_pixel_loss(modes, measurements, damp=0.0):
 
     return loss
 
-@_xr.register_dataarray_accessor("loss")
+@_xr.register_dataarray_accessor("utils_loss")
 class _LossAccessor(object):
     """
     Register a custom accessor LossAccessor on xarray.DataArray object.
@@ -158,7 +158,7 @@ class _LossAccessor(object):
             fig, ax = _plt.subplots(1, 1, figsize=figsize)
 
         data.plot(ax=ax, rasterized=rasterized, vmax=vmax, cmap=cmap)
-        minimum = data.loss.argmin()
+        minimum = data.utils_loss.argmin()
         dims = data.dims
 
         ax.scatter(minimum[dims[1]], minimum[dims[0]], s=s, c=minimum_color, marker='o', label='Global minimum')
