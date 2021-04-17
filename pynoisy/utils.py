@@ -11,7 +11,6 @@ import inspect as _inspect
 from dask.diagnostics import ProgressBar as _ProgressBar
 from functools import wraps as _wraps
 
-
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True), units='unitless'):
     """
     Return a 2D DataArray with coordinates spaced over a specified interval.
@@ -211,7 +210,28 @@ class _FourierAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def _phase(self, u, v, psize, image_dim_sizes, fft_dims=['u', 'v']):
+    def check_image_dims(func):
+        """
+        A decorator (wrapper) for observations to check that 'x', 'y' exist and are equal
+
+        Returns
+        -------
+        wrapper: pynoisy.observation.check_xy_equal,
+        """
+
+        @_wraps(func)
+        def wrapper(*args, **kwargs):
+            kwargs = aggregate_kwargs(func, *args, **kwargs)
+            if (kwargs['image_dims'][0] not in args[0]._obj.dims) or (kwargs['image_dims'][1] not in args[0]._obj.dims):
+                raise AttributeError('DataArray needs both image coordinate: {},{}'.format(*kwargs['image_dims']))
+            _np.testing.assert_equal(args[0]._obj[kwargs['image_dims'][0]].data,
+                                     args[0]._obj[kwargs['image_dims'][1]].data)
+            output = func(**kwargs)
+            return output
+
+        return wrapper
+
+    def _extra_phase(self, u, v, psize, image_dim_sizes):
         """
         Extra phase to match centroid convention.
 
@@ -223,8 +243,6 @@ class _FourierAccessor(object):
             pixel size
         image_dim_sizes: tuple (image_dim0.size, image_dim1.size)
             Image dimension sizes (without padding)
-        fft_dims: [dim1, dim2], default=['u', 'v']
-            Fourier data dimensions.
 
         Returns:
         ----------
@@ -235,7 +253,7 @@ class _FourierAccessor(object):
                                                 (1 + image_dim_sizes[1] % 2) * v))
         return phase
 
-    def _trianglePulse2D(self, u, v, psize, fft_dims=['u', 'v']):
+    def _trianglePulse2D(self, u, v, psize):
         """
         Modification of eht-imaging trianglePulse_F for a DataArray of points
 
@@ -245,8 +263,6 @@ class _FourierAccessor(object):
             arrays of Fourier frequencies.
         psize: float,
             pixel size
-        fft_dims: [dim1, dim2], default=['u', 'v']
-            Fourier data dimensions.
 
         Returns
         -------
@@ -265,6 +281,7 @@ class _FourierAccessor(object):
 
         return pulse_u * pulse_v
 
+    @check_image_dims
     def fft(self, fft_pad_factor=2, image_dims=['y', 'x'], fft_dims=['u', 'v']):
         """
         Fast Fourier transform of one or several movies.
@@ -289,9 +306,6 @@ class _FourierAccessor(object):
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
         movies = self._obj.squeeze()
-        if ('x' not in movies.dims) or ('y' not in movies.dims):
-            raise AttributeError('DataArray needs both x and y coordinate')
-        _np.testing.assert_equal(movies[image_dims[0]].data, movies[image_dims[1]].data)
 
         # Pad images according to pad factor (interpolation in Fourier space)
         ny, nx = movies[image_dims[0]].size, movies[image_dims[1]].size
@@ -314,6 +328,19 @@ class _FourierAccessor(object):
             coords[fft_dim].attrs.update(inverse_units=movies[image_dim].units)
         fft = _xr.DataArray(data=fft, dims=coords.dims, coords=coords.coords)
         return fft
+
+    @property
+    def phase(self):
+        return _xr.DataArray(_np.angle(self._obj.data),
+                             coords=self._obj.coords,
+                             dims=self._obj.dims,
+                             attrs=self._obj.attrs)
+    @property
+    def logmagnitude(self):
+        return _xr.DataArray(_np.log(_np.abs(self._obj.data)),
+                             coords=self._obj.coords,
+                             dims=self._obj.dims,
+                             attrs=self._obj.attrs)
 
 @_xr.register_dataarray_accessor("movie")
 class _MovieAccessor(object):
@@ -741,6 +768,7 @@ def mode_map(output_type, data_vars=None, progress_bar=True):
         return wrapper
 
     return decorator
+
 
 #########
 """

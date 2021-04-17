@@ -96,8 +96,8 @@ class _ObserveAccessor(object):
         psize = movies.image.psize
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
         fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims)
-        fft *= fft.fourier._trianglePulse2D(fft.u, fft.v, psize, fft_dims) * \
-               fft.fourier._phase(fft.u, fft.v, psize, image_dim_sizes, fft_dims)
+        fft *= fft.fourier._trianglePulse2D(fft.u, fft.v, psize) * \
+               fft.fourier._extra_phase(fft.u, fft.v, psize, image_dim_sizes)
 
         if ('r' in fft.coords) and ('theta' in fft.coords):
             fft = fft.polar.add_coords(image_dims=['u', 'v'])
@@ -149,8 +149,8 @@ class _ObserveAccessor(object):
         t = _np.concatenate([obsdata['time'] for obsdata in obslist])
 
         # Extra phase to match centroid convention
-        pulsefac = fft.fourier._trianglePulse2D(u, v, psize, fft_dims)
-        phase = fft.fourier._phase(u, v, psize, image_dim_sizes, fft_dims)
+        pulsefac = fft.fourier._trianglePulse2D(u, v, psize)
+        phase = fft.fourier._extra_phase(u, v, psize, image_dim_sizes)
 
         fft = fft.assign_coords(u2=(fft_dims[0], range(fft[fft_dims[0]].size)),
                                 v2=(fft_dims[1], range(fft[fft_dims[1]].size)))
