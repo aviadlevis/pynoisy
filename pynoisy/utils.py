@@ -892,17 +892,97 @@ def opening_angles_vis_residuals(files, measurements, obs, envelope, interp_meth
 
     return output
 """
+@_xr.register_dataset_accessor("utils_io")
+@_xr.register_dataarray_accessor("utils_io")
+class IOAccessor(object):
+    """
+    Register a custom accessor MovieAccessor on xarray.DataArray and xarray.Dataset objects.
+    This adds methods for input/output saving to disk large dataset and coordinates.
+    """
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
 
-def save_complex(dataset, *args, **kwargs):
-    ds = dataset.expand_dims('reim', axis=-1) # Add ReIm axis at the end
-    ds = _xr.concat([ds.real, ds.imag], dim='reim')
-    return ds.to_netcdf(*args, **kwargs)
+    def _expand_variable(self, nc_variable, data, expanding_dim, nc_shape, added_size):
+        # For time deltas, we must ensure that we use the same encoding as what was previously stored.
+        # We likely need to do this as well for variables that had custom econdings too
+        if hasattr(nc_variable, 'calendar'):
+            data.encoding = {
+                'units': nc_variable.units,
+                'calendar': nc_variable.calendar,
+            }
+        data_encoded = _xr.conventions.encode_cf_variable(data)  # , name=name)
+        left_slices = data.dims.index(expanding_dim)
+        right_slices = data.ndim - left_slices - 1
+        nc_slice = (slice(None),) * left_slices + (slice(nc_shape, nc_shape + added_size),) + (slice(None),) * (
+            right_slices)
+        nc_variable[nc_slice] = data_encoded.data
 
+    def append_to_netcdf(self, filename, unlimited_dims):
+        """
+        Append data to existing netcdf file along specified dimensions
+
+        Parameters
+        ----------
+        filename: str,
+            Netcdf file name
+        unlimited_dims: str or list of strings,
+            Dimension(s) that should be serialized as unlimited dimensions
+
+        References
+        ----------
+        https://github.com/pydata/xarray/issues/1672#issuecomment-685222909
+        """
+        import netCDF4
+
+        if isinstance(unlimited_dims, str):
+            unlimited_dims = [unlimited_dims]
+
+        if len(unlimited_dims) != 1:
+            # TODO: change this so it can support multiple expanding dims
+            raise ValueError('One unlimited dim is supported, got {}'.format(len(unlimited_dims)))
+
+        unlimited_dims = list(set(unlimited_dims))
+        expanding_dim = unlimited_dims[0]
+
+        with netCDF4.Dataset(filename, mode='a') as nc:
+            nc_coord = nc[expanding_dim]
+            nc_shape = len(nc_coord)
+
+            added_size = len(self._obj[expanding_dim])
+            variables, attrs = _xr.conventions.encode_dataset_coordinates(self._obj)
+
+            for name, data in variables.items():
+                if expanding_dim not in data.dims:
+                    # Nothing to do, data assumed to the identical
+                    continue
+
+                nc_variable = nc[name]
+                self._expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size)
+
+    @_wraps(_xr.Dataset.to_netcdf)
+    def save_complex(self, *args, **kwargs):
+        """
+        Wraps NetCDF saving of complex data by appending reim axis at the end
+
+        References
+        ----------
+        http://xarray.pydata.org/en/stable/generated/xarray.Dataset.to_netcdf.html
+        """
+        ds = self._obj.expand_dims('reim', axis=-1)
+        ds = _xr.concat([ds.real, ds.imag], dim='reim')
+        return ds.to_netcdf(*args, **kwargs)
+
+@_wraps(_xr.load_dataset)
 def read_complex(*args, **kwargs):
+    """
+    Wraps NetCDF reading of complex data by stacking reim axis
+
+    References
+    ----------
+    http://xarray.pydata.org/en/stable/generated/xarray.Dataset.to_netcdf.html
+    """
     ds = _xr.open_dataset(*args, **kwargs)
     output = ds.isel(reim=0) + 1j * ds.isel(reim=1)
     output.attrs.update(ds.attrs)
     output = output.to_array().squeeze('variable') if len(output.data_vars.items()) == 1 else output
     return output
-
-
