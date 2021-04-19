@@ -703,7 +703,7 @@ def aggregate_kwargs(func, *args, **kwargs):
         kwargs.update({args_keys[i]: arg})
     return kwargs
 
-def mode_map(output_type, data_vars=None, progress_bar=True):
+def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=True):
     """
     A decorator (wrapper) for dask computations over the entire mode dataset for an output a DataArray or Dataset.
 
@@ -713,6 +713,10 @@ def mode_map(output_type, data_vars=None, progress_bar=True):
         Two xarray output types
     data_dars: string or list of strings, optional
         If the output_type is Dataset, the string/list of strings should specify the data_vars
+    out_dims: string or list of strings, optional
+        If None, the output dimensions are assumed to be the dataset dimensions which are not ['degree', 't', 'x', 'y'].
+    chunk: int or list, default=1,
+        Output chunks size along the out_dims dimensions. Default=1 which extends along all output dimensions/.
     progress_bar: bool, default=True,
         Progress bar is useful as manifold computations can be time consuming.
 
@@ -724,12 +728,31 @@ def mode_map(output_type, data_vars=None, progress_bar=True):
     def decorator(func):
         @_wraps(func)
         def wrapper(modes, *args, **kwargs):
-            # Manifold dimensions are the modes dimensions without ['degree', 't', 'x', 'y'].
+
+            # Modes dimensions without ['degree', 't', 'x', 'y'].
             coords = modes.coords.to_dataset()
-            for dim in ['degree', 't', 'x', 'y']:
-                del coords[dim]
-            dim_names = list(coords.dims.keys())
-            dim_sizes = list(coords.dims.values())
+            if out_dims is None:
+                for dim in ['degree', 't', 'x', 'y']:
+                    del coords[dim]
+                dim_names = list(coords.dims.keys())
+                dim_sizes = list(coords.dims.values())
+
+            # User specified output dimensions
+            else:
+                dim_names = out_dims
+                dim_sizes = [modes.dims[dim] for dim in out_dims]
+                for dim in coords.dims:
+                    if not dim in dim_names:
+                        del coords[dim]
+            coords = coords.coords
+
+            chunks = chunk
+            if _np.isscalar(chunks):
+                chunks = [chunks] * len(dim_names)
+            else:
+                if len(chunks) != len(dim_names):
+                    raise AttributeError('Chunks and output dims have different lengths: out_dims={}, chunks={}'.format(
+                        dim_names, chunks))
 
             # Generate an output template for dask which fits in a single chunk
             if (output_type == 'Dataset'):
@@ -744,13 +767,10 @@ def mode_map(output_type, data_vars=None, progress_bar=True):
                         data_dict[var_name] = (dim_names, _np.empty(dim_sizes))
                 else:
                     raise AttributeError('data_vars can be either string or list of strings')
-
-                template = _xr.Dataset(data_vars=data_dict, coords=coords.coords).chunk(
-                    dict(zip(dim_names, [1] * len(dim_names))))
+                template = _xr.Dataset(data_vars=data_dict, coords=coords).chunk(dict(zip(dim_names, chunks)))
 
             elif (output_type == 'DataArray'):
-                template = _xr.DataArray(coords=coords.coords).chunk(
-                    dict(zip(dim_names, [1] * len(dim_names))))
+                template = _xr.DataArray(coords=coords, dims=dim_names).chunk(dict(zip(dim_names, chunks)))
 
             else:
                 raise AttributeError('data types allowed are: "DataArray" or "Dataset"')

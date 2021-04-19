@@ -179,6 +179,24 @@ class _VisualizationAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+    def visamp(self, ax=None, color=None, s=20):
+        """
+        Scatter plot of visibility amplitudes vs uv-distance
+
+        Parameters
+        ----------
+        ax: matplotlib axis,
+            A matplotlib axis object for the visualization.
+        color : color or color sequence, optional
+            Color of the scatter plot data points.
+        s: float, default=20,
+            Size of the datapoints
+        """
+        data = self._obj.sortby('uvdist')
+        if ax is None:
+            fig, ax = _plt.subplots()
+        ax.scatter(data.uvdist, _np.abs(data), color=color, s=s)
+
     def slider(self, t_dim='t', ax=None, cmap=None):
         """
         Interactive slider visualization of a 3D xr.DataArray along specified dimension.
@@ -313,7 +331,7 @@ class _VisualizationAccessor(object):
         downscale_factor: int, default=8
             Downscale the quiver image. Note that this could cause interpolation issues for high downscales or
             factors that are not powers of two.
-        color : color or color sequence, optional
+        color : color or color sequence, default='black'
             Explicit color(s) for the arrows. If *C* has been set, *color* has no effect.
         alpha: float in range (0, 1)
             Alpha transparency for the quiver.

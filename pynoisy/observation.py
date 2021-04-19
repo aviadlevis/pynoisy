@@ -8,6 +8,7 @@ References
 """
 import xarray as _xr
 import numpy as _np
+import matplotlib.pyplot as _plt
 import scipy.ndimage as _nd
 import warnings as _warnings
 from functools import wraps as _wraps
@@ -15,6 +16,52 @@ import ehtim as _eh
 import ehtim.const_def as _ehc
 import pynoisy.utils as _utils
 
+def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
+    """
+    Plot the uv coverage as a function of observation time.
+    x axis: East-West frequency
+    y axis: North-South frequency
+
+    Parameters
+    ----------
+    obs: ehtim.Obsdata
+        ehtim Observation object
+    ax: matplotlib axis,
+        A matplotlib axis object for the visualization.
+    fontsize: float, default=14,
+        x/y-axis label fontsize.
+    cmap : str, default='rainbow'
+        A registered colormap name used to map scalar data to colors.
+    add_conjugate: bool, default=True,
+        Plot the conjugate points on the uv plane.
+    xlim, ylim: (xmin/ymin, xmax/ymax), default=(-9.5, 9.5)
+        x-axis range in [Giga lambda] units
+
+    Notes
+    -----
+
+    """
+    giga = 10**9
+    u = _np.concatenate([obsdata['u'] for obsdata in obs.tlist()])
+    v = _np.concatenate([obsdata['v'] for obsdata in obs.tlist()])
+    t = _np.concatenate([obsdata['time'] for obsdata in obs.tlist()])
+
+    if add_conjugate:
+        u = _np.concatenate([u, -u]) / giga
+        v = _np.concatenate([v, -v]) / giga
+        t = _np.concatenate([t, t])
+
+    if ax is None:
+        fig, ax = _plt.subplots(1, 1)
+
+    ax.scatter(u, v, c=t, cmap=_plt.cm.get_cmap(cmap))
+    ax.set_xlabel(r'East-West Freq $[G \lambda]$', fontsize=fontsize)
+    ax.set_ylabel(r'North-South Freq $[G \lambda]$', fontsize=fontsize)
+    ax.invert_xaxis()
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_aspect('equal')
+    _plt.tight_layout()
 
 def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278148651123,
                       ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850,
@@ -231,7 +278,8 @@ class _ObserveAccessor(object):
         else:
             raise ValueError("unsupported number of dimensions: {}".format(fft.ndim))
 
-        visibilities = visibilities.assign_coords(t=('index', t), u=('index', v), v=('index', u))
+        visibilities = visibilities.assign_coords(
+            t=('index', t), u=('index', v), v=('index', u), uvdist=('index', _np.sqrt(u**2 + v**2)))
         visibilities.attrs.update(fft_pad_factor=fft_pad_factor, source=obs.source)
         return visibilities
 
