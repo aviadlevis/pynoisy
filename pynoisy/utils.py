@@ -883,48 +883,6 @@ def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=T
 
     return decorator
 
-
-#########
-"""
-def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
-    obslist = obs.tlist()
-    u = np.concatenate([obsdata['u'] for obsdata in obslist])
-    v = np.concatenate([obsdata['v'] for obsdata in obslist])
-    t = np.concatenate([obsdata['time'] for obsdata in obslist])
-
-    if conjugate:
-        t = np.concatenate((t, t))
-        u = np.concatenate((u, -u))
-        v = np.concatenate((v, -v))
-
-    if format == 'movie':
-        # For static images duplicate temporal dimension
-        if 't' not in fourier.coords:
-            obstimes = [obsdata[0]['time'] for obsdata in obslist]
-            fourier = fourier.expand_dims(t=obstimes)
-
-        data = fourier.sel(
-            t=xr.DataArray(t, dims='index'),
-            u=xr.DataArray(v, dims='index'),
-            v=xr.DataArray(u, dims='index'), method='nearest'
-        )
-        eht_measurements = xr.full_like(fourier, fill_value=np.nan)
-        eht_measurements.attrs.update(fourier.attrs)
-        eht_measurements.attrs.update(source=obs.source)
-        eht_measurements.loc[{'t': data.t, 'u': data.u, 'v': data.v}] = data
-
-    elif format == 'array':
-        eht_coords = {'u': xr.DataArray(v, dims='index'), 'v': xr.DataArray(u, dims='index')}
-        if 't' in fourier.coords:
-            eht_coords.update(t=xr.DataArray(t, dims='index'))
-        eht_measurements = fourier.interp(eht_coords, method=method)
-    else:
-        raise NotImplementedError('format {} not implemented'.format(format))
-
-    return eht_measurements
-"""
-
-
 @_xr.register_dataset_accessor("utils_io")
 @_xr.register_dataarray_accessor("utils_io")
 class IOAccessor(object):
