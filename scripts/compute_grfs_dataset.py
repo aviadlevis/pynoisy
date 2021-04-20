@@ -1,20 +1,17 @@
 """
-This scripts computes and saves a dataset of SPDE modes.
-The modes are computed with randomized subspace iteration (RSI) [1], see pynoisy.linalg.randomized_subspace() for
-details on the input arguments of RSI. This scripts takes a yaml configuration file as input which describes the
+This scripts computes and saves a dataset of Gaussian Random Fields (GRFs) [1,2].
+This scripts takes a yaml configuration file as input which describes the
 dataset parameters and gridding. See `configs/opening_angles.yaml` for an example configuration file.
 To see description of command line arguments and help use
-    `python compute_modes_dataset.py --h
+    `python compute_grfs_dataset.py --h
 
 References
 ----------
-..[1] Halko, N., Martinsson, P.G. and Tropp, J.A.. Finding structure with randomness: Probabilistic algorithms
-      for constructing approximate matrix decompositions. SIAM review, 53(2), pp.217-288. 2011.
-      url: https://epubs.siam.org/doi/abs/10.1137/090771806
+.. [1] Lee, D. and Gammie, C.F., 2021. Disks as Inhomogeneous, Anisotropic Gaussian Random Fields.
+   The Astrophysical Journal, 906(1), p.39. url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
+.. [2] inoisy code: https://github.com/AFD-Illinois/inoisy
 """
-
 import numpy as np
-import xarray as xr
 import pynoisy
 from tqdm import tqdm
 import argparse, time, os, itertools, yaml
@@ -29,29 +26,10 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config',
                         help='Path to config yaml file.')
-    parser.add_argument('--save_residuals',
-                        action='store_true',
-                        help='Save modes residuals to files with the same format as modes.')
-
-    # Randomized subspace iteration (RSI) parameters
-    parser.add_argument('--blocksize',
-                        default=50,
-                        type=int,
-                        help='(default value: %(default)s) Block size for random subspace iteration (RSI).')
-    parser.add_argument('--maxiter',
-                        default=20,
-                        type=int,
-                        help='(default value: %(default)s) Maximum number of RSI iterations.')
-    parser.add_argument('--tol',
-                        default=1e-3,
-                        type=float,
-                        help='(default value: %(default)s) Tolerance (slope) for convergence'
-                             'residual statistics. Used if num_test_grfs > 0.')
-    parser.add_argument('--num_test_grfs',
+    parser.add_argument('--num',
                         default=10,
                         type=int,
-                        help='(default value: %(default)s) Number of test GRFs used to gather residual statistics.'
-                              'If set to zero than adaptive convergence criteria is ignored.')
+                        help='(default value: %(default)s) Number of grfs.')
 
     # Parallel processing parameters
     parser.add_argument('--n_jobs',
@@ -72,7 +50,7 @@ with open(args.config, 'r') as stream:
 
 # Setup output path and directory
 datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
-dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'modes')
+dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'grfs')
 Path(dirpath).mkdir(parents=True, exist_ok=True)
 
 # Dataset attributes (xarray doesnt save boolean attributes)
@@ -116,27 +94,15 @@ for i, param in enumerate(tqdm(param_grid, desc='parameter')):
     diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
     solver.update_advection(advection)
     solver.update_diffusion(diffusion)
-    modes, residuals = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
-                                               n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs, verbose=False)
+    grfs = solver.run(num_samples=args.num, n_jobs=args.n_jobs, verbose=0)
+    grfs.name = 'grfs'
 
     # Expand modes dimensions to include the dataset parameters
     for field_type, params in variable_params.items():
         for param, value in params.items():
-            modes = modes.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
-            if args.save_residuals:
-                residuals = residuals.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
+            grfs = grfs.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
 
-    # Save modes (and optionally residuals) to datasets
-    modes.attrs.update(attrs)
-    modes = modes.assign_coords({'file_index': i})
-    modes.to_netcdf(os.path.join(dirpath + 'mode{:04d}.nc'.format(i)))
-    if args.save_residuals:
-        residuals.to_netcdf(os.path.join(dirpath + 'residual{:04d}.nc'.format(i)))
-
-# Consolidate residuals into a single file (and delete temporary residual files)
-if args.save_residuals:
-    residuals = xr.open_mfdataset(os.path.join(dirpath, 'residual*.nc'))
-    residuals.attrs.update(attrs)
-    residuals.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
-    for p in Path(dirpath).glob('residual*'):
-        p.unlink()
+    # Save to datasets
+    grfs.attrs.update(attrs)
+    grfs = grfs.assign_coords({'file_index': i})
+    grfs.to_netcdf(os.path.join(dirpath + 'grf{:04d}.nc'.format(i)))

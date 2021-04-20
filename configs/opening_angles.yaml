@@ -37,7 +37,7 @@ grid:
 dataset:
   # Set the path for the output dataset.
   # Use <datetime> to inset the timestamp in dd-MMM-yyyy-hh:mm:ss format.
-  outpath: 'modes/opening_angles.<datetime>/mode{:04d}.nc'
+  outpath: 'datasets/opening_angles.<datetime>/'
 
 
 
