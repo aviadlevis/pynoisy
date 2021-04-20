@@ -201,6 +201,101 @@ def next_power_of_two(x):
     y = 2 ** (_math.ceil(_math.log(x, 2)))
     return y
 
+def dottest(Op, tol=1e-6, complexflag=0, raiseerror=True, verb=False):
+    """Dot test.
+    Generate random vectors :math:`\mathbf{u}` and :math:`\mathbf{v}` and perform dot-test to verify the validity of
+    forward and adjoint operators. This test can help to detect errors in the operator implementation.
+    This function was taken from PyLops [1].
+
+    Parameters
+    ----------
+    Op : :obj:`pylops.LinearOperator`
+        Linear operator to test.
+    tol : :obj:`float`, optional
+        Dottest tolerance
+    complexflag : :obj:`bool`, optional
+        generate random vectors with real (0) or complex numbers
+        (1: only model, 2: only data, 3:both)
+    raiseerror : :obj:`bool`, optional
+        Raise error or simply return ``False`` when dottest fails
+    verb : :obj:`bool`, optional
+        Verbosity
+
+    Raises
+    ------
+    ValueError
+        If dot-test is not verified within chosen tolerance.
+
+    Notes
+    -----
+    A dot-test is mathematical tool used in the development of numerical
+    linear operators.
+    More specifically, a correct implementation of forward and adjoint for
+    a linear operator should verify the following *equality*
+    within a numerical tolerance:
+    .. math::
+        (\mathbf{Op}*\mathbf{u})^H*\mathbf{v} =
+        \mathbf{u}^H*(\mathbf{Op}^H*\mathbf{v})
+
+    References
+    ----------
+    [1] https://github.com/PyLops/pylops/blob/master/pylops/utils/dottest.py
+    """
+    nr, nc = Op.shape
+
+    if complexflag in (0, 2):
+        u = _np.random.randn(nc)
+    else:
+        u = _np.random.randn(nc) + 1j*_np.random.randn(nc)
+
+    if complexflag in (0, 1):
+        v = _np.random.randn(nr)
+    else:
+        v = _np.random.randn(nr) + 1j*_np.random.randn(nr)
+
+    y = Op.matvec(u)   # Op * u
+    x = Op.rmatvec(v)  # Op'* v
+
+    if complexflag == 0:
+        yy = _np.dot(y, v) # (Op  * u)' * v
+        xx = _np.dot(u, x) # u' * (Op' * v)
+    else:
+        yy = _np.vdot(y, v) # (Op  * u)' * v
+        xx = _np.vdot(u, x) # u' * (Op' * v)
+
+    # evaluate if dot test is passed
+    if complexflag == 0:
+        if _np.abs((yy - xx) / ((yy + xx + 1e-15) / 2)) < tol:
+            if verb: print('Dot test passed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
+                           % (yy, xx))
+            return True
+        else:
+            if raiseerror:
+                raise ValueError('Dot test failed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
+                                 % (yy, xx))
+            if verb: print('Dot test failed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
+                           % (yy, xx))
+            return False
+    else:
+        checkreal = _np.abs((_np.real(yy) - _np.real(xx)) /
+                           ((_np.real(yy) + _np.real(xx)+1e-15) / 2)) < tol
+        checkimag = _np.abs((_np.real(yy) - _np.real(xx)) /
+                           ((_np.real(yy) + _np.real(xx)+1e-15) / 2)) < tol
+        if checkreal and checkimag:
+            if verb:
+                print('Dot test passed, v^T(Opu)=%f%+fi - u^T(Op^Tv)=%f%+fi'
+                      % (yy.real, yy.imag, xx.real, xx.imag))
+            return True
+        else:
+            if raiseerror:
+                raise ValueError('Dot test failed, v^H(Opu)=%f%+fi '
+                                 '- u^H(Op^Hv)=%f%+fi'
+                                 % (yy.real, yy.imag, xx.real, xx.imag))
+            if verb:
+                print('Dot test failed, v^H(Opu)=%f%+fi - u^H(Op^Hv)=%f%+fi'
+                      % (yy.real, yy.imag, xx.real, xx.imag))
+            return False
+
 @_xr.register_dataarray_accessor("fourier")
 class _FourierAccessor(object):
     """
@@ -827,71 +922,9 @@ def sample_eht(fourier, obs, conjugate=False, format='array', method='linear'):
         raise NotImplementedError('format {} not implemented'.format(format))
 
     return eht_measurements
-
-def opening_angles_vis_residuals(files, measurements, obs, envelope, interp_method='linear', damp=0.0, degree=np.inf,
-                                 fft_pad_factor=1, return_coefs=False, conjugate=False):
-
-    fov = float(envelope['x'].max() - envelope['x'].min())
-    envelope_fourier = ehtf.compute_block_visibilities(envelope, measurements.psize, fft_pad_factor=fft_pad_factor,
-                                                       conjugate=conjugate)
-    envelope_eht = sample_eht(envelope_fourier, obs, conjugate=conjugate, method=interp_method)
-    dynamic_measurements = measurements - envelope_eht
-    dynamic_measurements.attrs.update(measurements.attrs)
-    measurements = dynamic_measurements
-
-    residuals, coefficients = [], []
-    for file in tqdm(files):
-        modes = pynoisy.utils.load_modes(file, dtype=float).noisy_methods.to_world_coords(
-            tstart=float(measurements.t[0]), tstop=float(measurements.t[-1]), fov=fov)
-
-        residual, coefs = [], []
-        degree = min(degree, modes.deg.size)
-        for temporal_angle in tqdm(modes.temporal_angle, leave=False):
-            modes_reduced = modes.sel(temporal_angle=temporal_angle).isel(deg=slice(degree)).dropna('deg')
-            movies = modes_reduced.eigenvectors * envelope if envelope is not None else modes_reduced.eigenvectors
-            movies = movies * modes_reduced.eigenvalues
-
-            # Split subspace for large fft_pad_factor memory req
-            subspace = []
-            slice_size = int( np.ceil(movies.deg.size / fft_pad_factor))
-            for i in range(fft_pad_factor):
-                modes_fourier = ehtf.compute_block_visibilities(
-                    movies=movies.isel(deg=slice(i*slice_size, (i+1)*slice_size)),
-                    psize=measurements.psize, fft_pad_factor=fft_pad_factor)
-                modes_eht = sample_eht(modes_fourier, obs, conjugate=conjugate, method=interp_method)
-                subspace.append(modes_eht)
-                del modes_fourier
-            subspace = xr.concat(subspace, dim='deg')
-
-            output = pynoisy.linalg.projection_residual(measurements, subspace, damp=damp, return_coefs=return_coefs)
-
-            if return_coefs:
-                res, coef = output
-                coefs.append(coef.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
-            else:
-                res = output
-            residual.append(res.expand_dims(spatial_angle=modes.spatial_angle, temporal_angle=[temporal_angle]))
-
-        residual = xr.concat(residual, dim='temporal_angle')
-        if return_coefs:
-            coefficients.append(xr.concat(coefs, dim='temporal_angle'))
-        residuals.append(residual)
-        del modes
-        gc.collect()
-
-    residuals = xr.concat(residuals, dim='spatial_angle').sortby('spatial_angle').expand_dims(deg=[degree])
-    residuals.attrs.update(measurements.attrs)
-    residuals.attrs.update(file_num=len(files), damp=damp,
-                           interp_method=interp_method, fov=fov, conjugate=str(conjugate),
-                           with_envelope='False' if envelope is None else 'True')
-    output = residuals
-    if return_coefs:
-        coefficients = xr.concat(coefficients, dim='spatial_angle').sortby('spatial_angle')
-        coefficients.attrs.update(residuals.attrs)
-        output = (residuals, coefficients)
-
-    return output
 """
+
+
 @_xr.register_dataset_accessor("utils_io")
 @_xr.register_dataarray_accessor("utils_io")
 class IOAccessor(object):
