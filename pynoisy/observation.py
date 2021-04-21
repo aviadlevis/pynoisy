@@ -10,11 +10,7 @@ import xarray as _xr
 import numpy as _np
 import matplotlib.pyplot as _plt
 import scipy.ndimage as _nd
-import warnings as _warnings
-from functools import wraps as _wraps
 import ehtim as _eh
-import ehtim.const_def as _ehc
-import pynoisy.utils as _utils
 
 def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
     """
@@ -77,9 +73,9 @@ def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278
         Number of temporal frames.
     tint: float,
         Scan integration time in seconds
-    tstart: float, default=4.045833349227905
+    tstart: float, default=4.0
         Start time of the observation in hours
-    tstop: float, default=15.465278148651123
+    tstop: float, default=15.5
         End time of the observation in hours
     ra: float, default=17.761121055553343,
         Source Right Ascension in fractional hours.
@@ -117,49 +113,6 @@ class _ObserveAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def check_time_units(observe_fn):
-        """
-        A decorator (wrapper) for observations which require time units to be aligned to UTC hour.
-
-        Returns
-        -------
-        wrapper: pynoisy.observation.check_time_units,
-        """
-        @_wraps(observe_fn)
-        def wrapper(*args, **kwargs):
-            if ('t' in args[0]._obj.coords) and (args[0]._obj['t'].units != 'UTC hr'):
-                _warnings.warn('Units on dim "t" are not recognized, should be "UTC hr"')
-            output = observe_fn(*args, **kwargs)
-            return output
-        return wrapper
-
-    def check_image_units(observe_fn):
-        """
-        A decorator (wrapper) for observations which require radian units along image dimensions
-
-        Returns
-        -------
-        wrapper: pynoisy.observation.check_image_units,
-        """
-        @_wraps(observe_fn)
-        def wrapper(*args, **kwargs):
-            # Convert image dimensions into radian units
-            kwargs = _utils.aggregate_kwargs(observe_fn, *args, **kwargs)
-            rad_unit_conversion = {'rad': 1.0, 'as': _ehc.RADPERUAS, 'uas': _ehc.RADPERUAS}
-            for dim in kwargs['image_dims']:
-                dim_units = args[0]._obj[dim].units
-                if (dim_units == 'rad') or (dim_units == 'as') or (dim_units == 'uas'):
-                    args[0]._obj[dim] = _xr.DataArray(args[0]._obj[dim] * rad_unit_conversion[dim_units],
-                                                      attrs={'units': 'rad'})
-                else:
-                    _warnings.warn(
-                        'Units on dim {} not recognized (should be rad/as/uas). Assuming rad units'.format(dim))
-            output = observe_fn(**kwargs)
-            return output
-
-        return wrapper
-
-    @check_image_units
     def block_fourier(self, fft_pad_factor=2, image_dims=['y', 'x'], fft_dims=['u', 'v']):
         """
          Fast Fourier transform of one or several movies.
@@ -185,7 +138,8 @@ class _ObserveAccessor(object):
         Units of input data image_dims must be 'rad', 'as' or uas'.
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
-        movies = self._obj
+        movies = self._obj.squeeze().utils_image.to_radians(image_dims)
+
         psize = movies.utils_image.psize
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
         fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims)
@@ -196,8 +150,6 @@ class _ObserveAccessor(object):
             fft = fft.utils_polar.add_coords(image_dims=['u', 'v'])
         return fft
 
-    @check_time_units
-    @check_image_units
     def block_observe_same_nonoise(self, obs, fft_pad_factor=2, image_dims=['y', 'x']):
         """
         Modification of ehtim's observe_same_nonoise method for a block of movies.
@@ -228,7 +180,9 @@ class _ObserveAccessor(object):
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/movie.py#L981
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/observing/obs_simulate.py#L182
         """
-        movies = self._obj
+        movies = self._obj.squeeze().utils_image.to_radians(image_dims)
+        movies.utils_movie.check_time_units(obs.timetype)
+
         fft_dims = ['u', 'v']
 
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
@@ -283,8 +237,6 @@ class _ObserveAccessor(object):
         visibilities.attrs.update(fft_pad_factor=fft_pad_factor, source=obs.source)
         return visibilities
 
-    @check_time_units
-    @check_image_units
     def to_ehtim(self, ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850, source='SGRA',
                  image_dims=['y', 'x']):
         """
@@ -310,7 +262,9 @@ class _ObserveAccessor(object):
         output: ehtim.Movie or ehtim.Image objects
             A Movie or Image object depending on the data dimensionality
         """
-        movie = self._obj.squeeze()
+        movie = self._obj.squeeze().utils_image.to_radians(image_dims)
+        movie.utils_movie.check_time_units('UTC')
+
         if movie.ndim > 3:
             raise AttributeError('Data dimensions are greater than 3.')
         im_list = []
