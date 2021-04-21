@@ -432,7 +432,7 @@ class _FourierAccessor(object):
         for image_dim, fft_dim in zip(image_dims, fft_dims):
             coords = coords.swap_dims({image_dim: fft_dim}).drop(image_dim).assign_coords({fft_dim: freqs})
             coords[fft_dim].attrs.update(inverse_units=movies[image_dim].units)
-        fft = _xr.DataArray(data=fft, dims=coords.dims, coords=coords.coords)
+        fft = _xr.DataArray(data=fft, dims=coords.dims, coords=coords)
         return fft
 
     @property
