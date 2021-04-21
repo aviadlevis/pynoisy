@@ -21,6 +21,7 @@ import pynoisy.inverse
 import pynoisy.utils
 import pynoisy.linalg
 import pynoisy.visualization
+import pynoisy.operators
 
 # Try to import observation modules (requires eht-imaging)
 import warnings as _warnings

@@ -1,3 +1,6 @@
+"""
+Utility functions and methods.
+"""
 import xarray as _xr
 import numpy as _np
 import math as _math
@@ -201,100 +204,103 @@ def next_power_of_two(x):
     y = 2 ** (_math.ceil(_math.log(x, 2)))
     return y
 
-def dottest(Op, tol=1e-6, complexflag=0, raiseerror=True, verb=False):
-    """Dot test.
-    Generate random vectors :math:`\mathbf{u}` and :math:`\mathbf{v}` and perform dot-test to verify the validity of
-    forward and adjoint operators. This test can help to detect errors in the operator implementation.
-    This function was taken from PyLops [1].
+def aggregate_kwargs(func, *args, **kwargs):
+    """
+    Update kwargs dictionary with args and defaults parameters for func
+    """
+    signature = _inspect.signature(func)
+    kwargs.update(
+        {k: v.default for k, v in signature.parameters.items() if v.default is not _inspect.Parameter.empty}
+    )
+    args_keys = list(signature.parameters.keys())
+    for i, arg in enumerate(args):
+        kwargs.update({args_keys[i]: arg})
+    return kwargs
+
+def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=True):
+    """
+    A decorator (wrapper) for dask computations over the entire mode dataset for an output a DataArray or Dataset.
 
     Parameters
     ----------
-    Op : :obj:`pylops.LinearOperator`
-        Linear operator to test.
-    tol : :obj:`float`, optional
-        Dottest tolerance
-    complexflag : :obj:`bool`, optional
-        generate random vectors with real (0) or complex numbers
-        (1: only model, 2: only data, 3:both)
-    raiseerror : :obj:`bool`, optional
-        Raise error or simply return ``False`` when dottest fails
-    verb : :obj:`bool`, optional
-        Verbosity
+    output_type: 'DataArray' or 'Dataset'
+        Two xarray output types
+    data_dars: string or list of strings, optional
+        If the output_type is Dataset, the string/list of strings should specify the data_vars
+    out_dims: string or list of strings, optional
+        If None, the output dimensions are assumed to be the dataset dimensions which are not ['degree', 't', 'x', 'y'].
+    chunk: int or list, default=1,
+        Output chunks size along the out_dims dimensions. Default=1 which extends along all output dimensions/.
+    progress_bar: bool, default=True,
+        Progress bar is useful as manifold computations can be time consuming.
 
-    Raises
-    ------
-    ValueError
-        If dot-test is not verified within chosen tolerance.
-
-    Notes
-    -----
-    A dot-test is mathematical tool used in the development of numerical
-    linear operators.
-    More specifically, a correct implementation of forward and adjoint for
-    a linear operator should verify the following *equality*
-    within a numerical tolerance:
-    .. math::
-        (\mathbf{Op}*\mathbf{u})^H*\mathbf{v} =
-        \mathbf{u}^H*(\mathbf{Op}^H*\mathbf{v})
-
-    References
-    ----------
-    [1] https://github.com/PyLops/pylops/blob/master/pylops/utils/dottest.py
+    Returns
+    -------
+    wrapper: pynoisy.utils.mode_map,
+        A wrapped function which takes care of dask related tasks with some pre processing.
     """
-    nr, nc = Op.shape
+    def decorator(func):
+        @_wraps(func)
+        def wrapper(modes, *args, **kwargs):
 
-    if complexflag in (0, 2):
-        u = _np.random.randn(nc)
-    else:
-        u = _np.random.randn(nc) + 1j*_np.random.randn(nc)
+            # Modes dimensions without ['degree', 't', 'x', 'y'].
+            coords = modes.coords.to_dataset()
+            if out_dims is None:
+                for dim in ['degree', 't', 'x', 'y']:
+                    del coords[dim]
+                dim_names = list(coords.dims.keys())
+                dim_sizes = list(coords.dims.values())
 
-    if complexflag in (0, 1):
-        v = _np.random.randn(nr)
-    else:
-        v = _np.random.randn(nr) + 1j*_np.random.randn(nr)
+            # User specified output dimensions
+            else:
+                dim_names = out_dims
+                dim_sizes = [modes.dims[dim] for dim in out_dims]
+                for dim in coords.dims:
+                    if not dim in dim_names:
+                        del coords[dim]
+            coords = coords.coords
 
-    y = Op.matvec(u)   # Op * u
-    x = Op.rmatvec(v)  # Op'* v
+            chunks = chunk
+            if _np.isscalar(chunks):
+                chunks = [chunks] * len(dim_names)
+            else:
+                if len(chunks) != len(dim_names):
+                    raise AttributeError('Chunks and output dims have different lengths: out_dims={}, chunks={}'.format(
+                        dim_names, chunks))
 
-    if complexflag == 0:
-        yy = _np.dot(y, v) # (Op  * u)' * v
-        xx = _np.dot(u, x) # u' * (Op' * v)
-    else:
-        yy = _np.vdot(y, v) # (Op  * u)' * v
-        xx = _np.vdot(u, x) # u' * (Op' * v)
+            # Generate an output template for dask which fits in a single chunk
+            if (output_type == 'Dataset'):
+                if data_vars is None:
+                    raise AttributeError('For output_type="Dataset" data_vars arguments should be specified')
 
-    # evaluate if dot test is passed
-    if complexflag == 0:
-        if _np.abs((yy - xx) / ((yy + xx + 1e-15) / 2)) < tol:
-            if verb: print('Dot test passed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
-                           % (yy, xx))
-            return True
-        else:
-            if raiseerror:
-                raise ValueError('Dot test failed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
-                                 % (yy, xx))
-            if verb: print('Dot test failed, v^T(Opu)=%f - u^T(Op^Tv)=%f'
-                           % (yy, xx))
-            return False
-    else:
-        checkreal = _np.abs((_np.real(yy) - _np.real(xx)) /
-                           ((_np.real(yy) + _np.real(xx)+1e-15) / 2)) < tol
-        checkimag = _np.abs((_np.real(yy) - _np.real(xx)) /
-                           ((_np.real(yy) + _np.real(xx)+1e-15) / 2)) < tol
-        if checkreal and checkimag:
-            if verb:
-                print('Dot test passed, v^T(Opu)=%f%+fi - u^T(Op^Tv)=%f%+fi'
-                      % (yy.real, yy.imag, xx.real, xx.imag))
-            return True
-        else:
-            if raiseerror:
-                raise ValueError('Dot test failed, v^H(Opu)=%f%+fi '
-                                 '- u^H(Op^Hv)=%f%+fi'
-                                 % (yy.real, yy.imag, xx.real, xx.imag))
-            if verb:
-                print('Dot test failed, v^H(Opu)=%f%+fi - u^H(Op^Hv)=%f%+fi'
-                      % (yy.real, yy.imag, xx.real, xx.imag))
-            return False
+                data_dict = dict()
+                if isinstance(data_vars, str):
+                    data_dict[data_vars] = (dim_names, _np.empty(dim_sizes))
+                elif isinstance(data_vars, list):
+                    for var_name in data_vars:
+                        data_dict[var_name] = (dim_names, _np.empty(dim_sizes))
+                else:
+                    raise AttributeError('data_vars can be either string or list of strings')
+                template = _xr.Dataset(data_vars=data_dict, coords=coords).chunk(dict(zip(dim_names, chunks)))
+
+            elif (output_type == 'DataArray'):
+                template = _xr.DataArray(coords=coords, dims=dim_names).chunk(dict(zip(dim_names, chunks)))
+
+            else:
+                raise AttributeError('data types allowed are: "DataArray" or "Dataset"')
+
+            # Generate dask computation graph
+            mapped = _xr.map_blocks(func, modes, template=template, args=args, kwargs=kwargs)
+
+            if progress_bar:
+                with _ProgressBar():
+                    output = mapped.compute()
+            else:
+                output = mapped.compute()
+            return output
+        return wrapper
+
+    return decorator
 
 @_xr.register_dataarray_accessor("fourier")
 class _FourierAccessor(object):
@@ -784,104 +790,6 @@ class _TensorAccessor(object):
             return _np.arctan2(self._obj.vy, self._obj.vx)
         else:
             raise AttributeError('Dataset has to contain both vx and vy')
-
-def aggregate_kwargs(func, *args, **kwargs):
-    """
-    Update kwargs dictionary with args and defaults parameters for func
-    """
-    signature = _inspect.signature(func)
-    kwargs.update(
-        {k: v.default for k, v in signature.parameters.items() if v.default is not _inspect.Parameter.empty}
-    )
-    args_keys = list(signature.parameters.keys())
-    for i, arg in enumerate(args):
-        kwargs.update({args_keys[i]: arg})
-    return kwargs
-
-def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=True):
-    """
-    A decorator (wrapper) for dask computations over the entire mode dataset for an output a DataArray or Dataset.
-
-    Parameters
-    ----------
-    output_type: 'DataArray' or 'Dataset'
-        Two xarray output types
-    data_dars: string or list of strings, optional
-        If the output_type is Dataset, the string/list of strings should specify the data_vars
-    out_dims: string or list of strings, optional
-        If None, the output dimensions are assumed to be the dataset dimensions which are not ['degree', 't', 'x', 'y'].
-    chunk: int or list, default=1,
-        Output chunks size along the out_dims dimensions. Default=1 which extends along all output dimensions/.
-    progress_bar: bool, default=True,
-        Progress bar is useful as manifold computations can be time consuming.
-
-    Returns
-    -------
-    wrapper: pynoisy.utils.mode_map,
-        A wrapped function which takes care of dask related tasks with some pre processing.
-    """
-    def decorator(func):
-        @_wraps(func)
-        def wrapper(modes, *args, **kwargs):
-
-            # Modes dimensions without ['degree', 't', 'x', 'y'].
-            coords = modes.coords.to_dataset()
-            if out_dims is None:
-                for dim in ['degree', 't', 'x', 'y']:
-                    del coords[dim]
-                dim_names = list(coords.dims.keys())
-                dim_sizes = list(coords.dims.values())
-
-            # User specified output dimensions
-            else:
-                dim_names = out_dims
-                dim_sizes = [modes.dims[dim] for dim in out_dims]
-                for dim in coords.dims:
-                    if not dim in dim_names:
-                        del coords[dim]
-            coords = coords.coords
-
-            chunks = chunk
-            if _np.isscalar(chunks):
-                chunks = [chunks] * len(dim_names)
-            else:
-                if len(chunks) != len(dim_names):
-                    raise AttributeError('Chunks and output dims have different lengths: out_dims={}, chunks={}'.format(
-                        dim_names, chunks))
-
-            # Generate an output template for dask which fits in a single chunk
-            if (output_type == 'Dataset'):
-                if data_vars is None:
-                    raise AttributeError('For output_type="Dataset" data_vars arguments should be specified')
-
-                data_dict = dict()
-                if isinstance(data_vars, str):
-                    data_dict[data_vars] = (dim_names, _np.empty(dim_sizes))
-                elif isinstance(data_vars, list):
-                    for var_name in data_vars:
-                        data_dict[var_name] = (dim_names, _np.empty(dim_sizes))
-                else:
-                    raise AttributeError('data_vars can be either string or list of strings')
-                template = _xr.Dataset(data_vars=data_dict, coords=coords).chunk(dict(zip(dim_names, chunks)))
-
-            elif (output_type == 'DataArray'):
-                template = _xr.DataArray(coords=coords, dims=dim_names).chunk(dict(zip(dim_names, chunks)))
-
-            else:
-                raise AttributeError('data types allowed are: "DataArray" or "Dataset"')
-
-            # Generate dask computation graph
-            mapped = _xr.map_blocks(func, modes, template=template, args=args, kwargs=kwargs)
-
-            if progress_bar:
-                with _ProgressBar():
-                    output = mapped.compute()
-            else:
-                output = mapped.compute()
-            return output
-        return wrapper
-
-    return decorator
 
 @_xr.register_dataset_accessor("utils_io")
 @_xr.register_dataarray_accessor("utils_io")

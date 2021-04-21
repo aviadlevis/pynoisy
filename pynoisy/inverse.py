@@ -14,7 +14,7 @@ import xarray as _xr
 import gc as _gc
 import matplotlib.pyplot as _plt
 import pynoisy.linalg as _linalg
-import pynoisy.utils as _utils 
+import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
 def compute_pixel_loss(modes, measurements, damp=0.0):

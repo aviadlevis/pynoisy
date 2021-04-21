@@ -14,72 +14,7 @@ import warnings as _warnings
 from functools import wraps as _wraps
 import ehtim as _eh
 import ehtim.const_def as _ehc
-import ehtim.observing.obs_helpers as _obsh
 import pynoisy.utils as _utils
-from scipy.sparse.linalg import LinearOperator as _LinearOperator
-
-class ObserveOp(_LinearOperator):
-    """
-    An EHT observation operator in the form of scipy.sparse.linalg.LinearOperator object.
-    This object implements the _matvec and _rmatvec methods for forward and adjoint computation.
-
-    Parameters
-    ----------
-    obs; ehtim.Observation,
-        ehtim Observation object.
-    movie_coords: xr.Coordinates,
-        The coordinates of the movie
-    dtype: np.dtype, default=np.complex128,
-        Datatype
-
-    Notes
-    -----
-    To check the validity of the adjoint with respect to the forward use: `pynoisy.utils.dottest`
-    """
-    def __init__(self, obs, movie_coords, dtype=_np.complex128):
-        # Forward coordinates
-        obslist = obs.tlist()
-        u_list = [obsdata['u'] for obsdata in obslist]
-        v_list = [obsdata['v'] for obsdata in obslist]
-        t_list = [obsdata[0]['time'] for obsdata in obslist]
-        t = _np.concatenate([obsdata['time'] for obsdata in obslist])
-        u, v = _np.concatenate(u_list), _np.concatenate(v_list)
-        self._vis_coords = {'t': ('index', t), 'u': ('index', u), 'v': ('index', v),
-                            'uvdist': ('index', _np.sqrt(u ** 2 + v ** 2))}
-        self._obstimes = t_list
-        uv_per_t = _np.array([len(obsdata['v']) for obsdata in obslist])
-        self._uvsplit = _np.cumsum(uv_per_t)[:-1]
-
-        # Adjoint coordinates
-        self._movie_coords = movie_coords
-
-        # Define forward operator as a sequence (list) of matrix operations
-        A = []
-        self._nx = movie_coords['x'].size
-        self._ny = movie_coords['y'].size
-        self._nt = movie_coords['t'].size
-        psize = movie_coords.to_dataset().utils_image.psize
-        for ui, vi in zip(u_list, v_list):
-            A.append(_obsh.ftmatrix(psize, self._nx, self._ny, _np.vstack((ui, vi)).T))
-        self._A = A
-
-        # Shape and datatype
-        self.shape = (u.size, self._nt * self._ny * self._nx)
-        self.dtype = dtype
-
-    def _matvec(self, x):
-        x = x.reshape(self._nt, self._nx, self._ny) if x.ndim != 3 else x
-        x = _xr.DataArray(x, coords=self._movie_coords, dims=['t', 'y', 'x']).interp(
-            t=self._obstimes, assume_sorted=True)
-        output = _np.concatenate([
-            _np.matmul(At, xt.data.ravel()) for At, xt in zip(self._A, x)
-        ])
-        return output
-
-    def _rmatvec(self, x):
-        x_list = _np.split(x, self._uvsplit)
-        return _np.concatenate([_np.matmul(At.conj().T, xt) for At, xt in zip(self._A, x_list)])
-
 
 def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
     """

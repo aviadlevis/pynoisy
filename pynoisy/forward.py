@@ -468,7 +468,6 @@ class HGRFSolver(object):
     def v(self):
         return _np.stack([self.advection.vx, self.advection.vy], axis=-1)
 
-
 def modulate(envelope, grf, alpha, keep_attrs=True):
     """
     Modulate an envelope by an exponential of the Gaussian Random Field (GRF):
