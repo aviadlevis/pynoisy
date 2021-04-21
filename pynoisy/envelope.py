@@ -6,7 +6,7 @@ import numpy as _np
 import xarray as _xr
 import pynoisy.utils as _utils
 
-def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
+def ring(ny, nx, fov=(1.0, 'unitless'), inner_radius=0.17, outer_radius=1.0, photon_ring_thickness=0.05, photon_ring_contrast=0.95,
          photon_ring_decay=100.0, ascent=1.0, inner_decay=8.0, outer_decay=10, total_flux=1.0):
     """
     Ring envelope with a brighter photon ring in the inner-most orbit [1].
@@ -15,8 +15,8 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
     ----------
     ny, nx: int,
             Number of (y/x)-axis grid points.
-    fov: float, default=1.0,
-        Field of view. Default is unitless 1.0.
+    fov: (float, str), default=(1.0, 'unitless')
+        Field of view and units. Default is unitless 1.0.
     inner_radius: float, default=0.2,
         inner radius of the black-hole shadow.
     outer_radius: float, default=1.0,
@@ -47,7 +47,7 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
            The Astrophysical Journal Letters, 885(2), p.L33. 2019.
            url: https://iopscience.iop.org/article/10.3847/2041-8213/ab518c/pdf
     """
-    grid = _utils.linspace_2d((ny, nx), (-fov/2.0, -fov/2.0), (fov/2.0, fov/2.0))
+    grid = _utils.linspace_2d((ny, nx), (-fov[0]/2.0, -fov[0]/2.0), (fov[0]/2.0, fov[0]/2.0), units=fov[1])
     r = grid.r.data
 
     zone0_radius = inner_radius
@@ -102,7 +102,7 @@ def ring(ny, nx, fov=1.0, inner_radius=0.17, outer_radius=1.0, photon_ring_thick
     envelope *= (total_flux / envelope.sum())
     return envelope
 
-def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
+def gaussian(ny, nx, fov=(1.0, 'unitless'), std=0.2, fwhm=None, total_flux=1.0):
     """
     Gaussian envelope.
 
@@ -110,8 +110,8 @@ def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
     ----------
     ny, nx: int,
             Number of (y/x)-axis grid points.
-    fov: float, default=1.0,
-        Field of view. Default is unitless 1.0.
+    fov: (float, str), default=(1.0, 'unitless')
+        Field of view and units. Default is unitless 1.0.
     std: float, default=0.2, optional,
         Gaussian standard deviation. Used if fwhm is not specified.
     fwhm: float, optional,
@@ -125,13 +125,13 @@ def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
         An image DataArray with dimensions ['y', 'x'].
     """
     if fwhm is None:
-        fwhm = std * _np.sqrt(2 * _np.log(2)) * 2 / _np.sqrt(2)
+        fwhm = 2 * _np.sqrt(2 * _np.log(2)) * std
     else:
-        std = fwhm * _np.sqrt(2) / (_np.sqrt(2 * _np.log(2)) * 2)
+        std = fwhm / (2 * _np.sqrt(2 * _np.log(2)))
 
-    grid = _utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    grid = _utils.linspace_2d((ny, nx), (-fov[0] / 2.0, -fov[0] / 2.0), (fov[0] / 2.0, fov[0] / 2.0), units=fov[1])
     r = grid.r.data
-    data = _np.exp(-(r / std) ** 2)
+    data = _np.exp(-0.5*(r / std) ** 2)
 
     envelope = _xr.DataArray(
         name='envelope',
@@ -148,7 +148,7 @@ def gaussian(ny, nx, fov=1.0, std=0.2, fwhm=None, total_flux=1.0):
     envelope *= (total_flux / envelope.sum())
     return envelope
 
-def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
+def disk(ny, nx, fov=(1.0, 'unitless'), radius=0.2, decay=20, total_flux=1.0):
     """
     Disk envelope.
 
@@ -156,8 +156,8 @@ def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     ----------
     ny, nx: int,
             Number of (y/x)-axis grid points.
-    fov: float, default=1.0,
-        Field of view. Default is unitless 1.0 (from -0.5 to +0.5).
+    fov: (float, str), default=(1.0, 'unitless')
+        Field of view and units. Default is unitless 1.0.
     radius: float, default=0.2, optional,
         Disk radius.
     decay: float, default=20.
@@ -170,7 +170,7 @@ def disk(ny, nx, fov=1.0, radius=0.2, decay=20, total_flux=1.0):
     envelope: xr.DataArray,
         An image DataArray with dimensions ['y', 'x'].
     """
-    grid = _utils.linspace_2d((ny, nx), (-fov / 2.0, -fov / 2.0), (fov / 2.0, fov / 2.0))
+    grid = _utils.linspace_2d((ny, nx), (-fov[0] / 2.0, -fov[0] / 2.0), (fov[0] / 2.0, fov[0] / 2.0), units=fov[1])
     data = _utils.full_like(grid.coords, fill_value=1.0)
     data.values[data.r >= .95 * radius] = 0
     exponential_decay = _np.exp(-decay * (data.r - .95 * radius))
