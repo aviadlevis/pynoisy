@@ -124,11 +124,11 @@ class ModulateOp(_LinearOperator):
         Exponential rate
     dtype: datatype, default=np.float64
     """
-    def __init__(self, grf, alpha=1.0, dtype=_np.float64):
-        self.modulation = _np.exp(alpha * grf).data.reshape(grf['t'].size, -1)
+    def __init__(self, modulation, dtype=_np.float64):
+        self.modulation = modulation.data.reshape(modulation['t'].size, -1)
 
         # Shape and datatype
-        nt, ny, nx = grf['t'].size, grf['y'].size, grf['x'].size
+        nt, ny, nx = modulation['t'].size, modulation['y'].size, modulation['x'].size
         self._nt = nt
         self.shape = (nt * ny * nx, ny * nx)
         self.dtype = dtype
@@ -156,6 +156,9 @@ class ObserveOp(_LinearOperator):
     """
     def __init__(self, obs, movie_coords, dtype=_np.complex128):
 
+        movie_coords = movie_coords.to_dataset().utils_image.to_radians()
+        movie_coords['t'].utils_movie.check_time_units(obs.timetype)
+
         import ehtim.observing.obs_helpers as _obsh
 
         # Forward coordinates
@@ -179,7 +182,7 @@ class ObserveOp(_LinearOperator):
         self._nx = movie_coords['x'].size
         self._ny = movie_coords['y'].size
         self._nt = movie_coords['t'].size
-        psize = movie_coords.to_dataset().utils_image.psize
+        psize = movie_coords.utils_image.psize
         for ui, vi in zip(u_list, v_list):
             A.append(_obsh.ftmatrix(psize, self._nx, self._ny, _np.vstack((ui, vi)).T))
         self._A = A
@@ -210,47 +213,43 @@ class Loss(object):
     ----------
     data_ops: pynoisy.operators.LossOperator or list of pynoisy.operators.LossOperator,
         Data-fit operators which implement: `__call__(self, x)` and `gradient(self, x)`.
-    data_weights: float or list of float,
-        Weights for the data-terms. Should be same length as data_ops.
     reg_ops: pynoisy.operators.LossOperator or list of pynoisy.operators.LossOperator, optional.
         Regularization operators which implement: `__call__(self, x)` and `gradient(self, x)`.
-    reg_weights: float or list of float,
-        Weights for the regularization-terms. Should be same length reg_ops data_ops.
     """
-    def __init__(self, data_ops, data_weights, reg_ops=None, reg_weights=None):
+    def __init__(self, data_ops, reg_ops=None):
         self.data_ops = _np.atleast_1d(data_ops)
-        self.data_weights = _np.atleast_1d(data_weights)
-        if len(self.data_ops) != len(self.data_weights):
-            raise AttributeError('len(data_ops) != len(data_weights)')
-
         self.reg_ops = _np.atleast_1d(reg_ops)
-        self.reg_weights = _np.atleast_1d(reg_weights)
-        if len(self.reg_ops) != len(self.reg_weights):
-            raise AttributeError('len(reg_ops) != len(reg_weights)')
 
     def __call__(self, x):
-        loss = _np.sum([w * data_op(x) for data_op, w in zip(self.data_ops, self.data_weights)])
-        for reg_op, w in zip(self.reg_ops, self.reg_weights):
-            if (reg_op is not None) and (w is not None):
-                loss += w * reg_op(x)
+        loss = _np.sum([data_op.w * data_op(x) for data_op in self.data_ops])
+        for reg_op in self.reg_ops:
+            if (reg_op is not None):
+                loss += reg_op.w * reg_op(x)
         return loss
 
     def jac(self, x):
-        grad = _np.sum([w * data_op.gradient(x) for data_op, w in zip(self.data_ops, self.data_weights)], axis=0)
-        for reg_op, w in zip(self.reg_ops, self.reg_weights):
-            if (reg_op is not None) and (w is not None):
-                grad += w * reg_op.gradient(x)
+        grad = _np.sum([data_op.w * data_op.gradient(x) for data_op in self.data_ops], axis=0)
+        for reg_op in self.reg_ops:
+            if (reg_op is not None):
+                grad += reg_op.w * reg_op.gradient(x)
         return grad.real.astype(_np.float64)
 
 class LossOperator(object):
     """
     A LossOperator container which is inherited by the specific loss implementation.
     LossOperators should implement the methods: `__call__(self, x)` and `gradient(self, x)`.
+
+    Parameters
+    ----------
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
     """
-    def __init__(self):
-        pass
+    def __init__(self, weight=1.0):
+        self.w = weight
+
     def __call__(self, x):
         pass
+
     def gradient(self, x):
         pass
 
@@ -264,8 +263,11 @@ class L2LossOp(LossOperator):
         A 1D numpy array with measurement values.
     forwardOp: LinearOperator,
         A LinearOperator which implements: `_matvec(self, x)` and `_rmatvec(self, x)` (see [1])
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
     """
-    def __init__(self, measurements, forwardOp):
+    def __init__(self, measurements, forwardOp, weight=1.0):
+        super().__init__(weight=weight)
         self.measurements = measurements
         self.forwardOp = forwardOp
 
@@ -278,6 +280,11 @@ class L2LossOp(LossOperator):
 class L2RegOp(LossOperator):
     """
     An l2 regularization LossOperator implementing the computation and gradient of ||x||^2
+
+    Parameters
+    ----------
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
     """
     def __call__(self, x):
         return _np.sum(_np.abs(x) ** 2)
@@ -296,10 +303,13 @@ class MEMRegOp(LossOperator):
         A 1D numpy array which represents the (raveled) prior vector.
     eps: float, default=1e-5,
         A regularization parameter to avoid division by zero.
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
     """
-    def __init__(self, prior, eps=1e-5):
+    def __init__(self, prior, eps=1e-5, weight=1.0):
+        super().__init__(weight=weight)
         self.eps = eps
-        self.prior = prior
+        self.prior = _np.array(prior).ravel()
 
     def __call__(self, x):
         return _np.sum(x * _np.log((x + self.eps) / (self.prior + self.eps)))
@@ -315,8 +325,11 @@ class FluxRegOp(LossOperator):
     ----------
     prior: float,
         The prior on the total flux.
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
     """
-    def __init__(self, prior):
+    def __init__(self, prior, weight=1.0):
+        super().__init__(weight=weight)
         self.prior = prior
 
     def __call__(self, x):
@@ -324,3 +337,122 @@ class FluxRegOp(LossOperator):
 
     def gradient(self, x):
         return 2 * (_np.sum(x) - self.prior) * _np.ones(len(x), dtype=_np.float64)
+
+class STVRegOp(LossOperator):
+    """
+    Squared Total Variation regularization LossOperator:
+        STV[I(y,x)] = || \nabla_x I(y,x)||**2 + ||  \nabla_y I(y,x)||**2
+
+    Parameters
+    ----------
+    ny, nx: int,
+        Number of (y/x)-axis grid points.
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
+
+    Notes
+    -----
+    Requires PyLops library: https://pylops.readthedocs.io/
+    """
+    def __init__(self, ny, nx, edge=False, kind='forward', weight=1.0):
+        super().__init__(weight=weight)
+
+        from pylops import FirstDerivative
+        self.dyOp = FirstDerivative(nx*ny, dims=(ny, nx), dir=0, edge=edge, kind=kind)
+        self.dxOp = FirstDerivative(nx*ny, dims=(ny, nx), dir=1, edge=edge, kind=kind)
+        self.ny = ny
+        self.nx = nx
+
+    def __call__(self, x):
+        return _np.sum((self.dxOp*x)**2 + (self.dyOp*x)**2)
+
+    def gradient(self, x):
+        """
+        Compute the gradient of the TV regularization:
+            grad[STV(I)] = -2 * div( \nabla(I) )
+
+        Notes
+        -----
+        The adjoint of the gradient is minus the divergent.
+        """
+        return 2.0 * (self.dxOp.H * self.dxOp * x + self.dyOp.H * self.dyOp * x)
+
+class TVRegOp(LossOperator):
+    """
+    Total Variation regularization LossOperator:
+        TV[I(y,x)] = || \nabla_x I(y,x)||_1 + ||  \nabla_y I(y,x)||_1
+
+    Parameters
+    ----------
+    ny, nx: int,
+        Number of (y/x)-axis grid points.
+    weight: float, default=1.0,
+        The weight of the operator in the total loss
+
+    Notes
+    -----
+    Requires PyLops library: https://pylops.readthedocs.io/
+    """
+    def __init__(self, ny, nx, edge=False, kind='forward', eps=1e-8, weight=1.0):
+        super().__init__(weight=weight)
+
+        from pylops import FirstDerivative
+        self.dyOp = FirstDerivative(nx*ny, dims=(ny, nx), dir=0, edge=edge, kind=kind)
+        self.dxOp = FirstDerivative(nx*ny, dims=(ny, nx), dir=1, edge=edge, kind=kind)
+        self.eps = eps
+        self.ny = ny
+        self.nx = nx
+
+    def __call__(self, x):
+        return _np.sum(_np.abs(self.dxOp*x) + _np.abs(self.dyOp*x))
+
+    def gradient(self, x):
+        """
+        Compute the (epsilon regularized) gradient of the TV regularization:
+            grad[TV(I)] = -div( \nabla(I) / sqrt( eps**2 + \nabla(I)**2 ) )
+
+        Notes
+        -----
+        The adjoint of the gradient is minus the divergent.
+
+        References
+        ----------
+        https://mathematical-tours.github.io/book-sources/chapters-pdf/variational-priors.pdf
+        """
+        gradx, grady = self.dxOp*x, self.dyOp*x
+        gradient = self.dxOp.H * ( gradx / _np.sqrt(self.eps**2 + _np.abs(gradx)**2)) + \
+                   self.dyOp.H * ( grady / _np.sqrt(self.eps**2 + _np.abs(grady)**2))
+        return gradient
+
+    def _softthreshold(x, thresh):
+        """Soft thresholding.
+        Applies soft thresholding to vector ``x`` (equal to the proximity operator for
+            :math:`||\mathbf{x}||_1`) as shown in [1].
+
+        Parameters
+        ----------
+        x : :obj:`numpy.ndarray`
+            Vector
+        thresh : :obj:`float`
+            Threshold
+
+        Returns
+        -------
+        x1 : :obj:`numpy.ndarray`
+            Tresholded vector
+
+        Refrences
+        ---------
+        https://github.com/PyLops/pylops/blob/82b0f7dbc25ccdddc9bdab204d2f769d2ff4114f/pylops/optimization/sparsity.py#L53
+
+        .. [1] Chen, Y., Chen, K., Shi, P., Wang, Y., “Irregular seismic
+           data reconstruction using a percentile-half-thresholding algorithm”,
+           Journal of Geophysics and Engineering, vol. 11. 2014.
+        """
+        if _np.iscomplexobj(x):
+            # https://stats.stackexchange.com/questions/357339/soft-thresholding-
+            # for-the-lasso-with-complex-valued-data
+            x1 = _np.maximum(_np.abs(x) - thresh, 0.) * _np.exp(1j * _np.angle(x))
+        else:
+            x1 = _np.maximum(_np.abs(x) - thresh, 0.) * _np.sign(x)
+        return x1

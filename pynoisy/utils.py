@@ -243,10 +243,15 @@ def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=T
         @_wraps(func)
         def wrapper(modes, *args, **kwargs):
 
-            # Modes dimensions without ['degree', 't', 'x', 'y'].
+            # Drop non-dimensional coordinates
+            for dim in modes.coords.keys():
+                if dim not in modes.dims:
+                    modes = modes.drop(dim)
+
+            # Modes dimensions without ['degree', 't', 'y', 'x'].
             coords = modes.coords.to_dataset()
             if out_dims is None:
-                for dim in ['degree', 't', 'x', 'y']:
+                for dim in ['degree', 't', 'y', 'x']:
                     del coords[dim]
                 dim_names = list(coords.dims.keys())
                 dim_sizes = list(coords.dims.values())
@@ -452,7 +457,40 @@ class _MovieAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def set_time(self, tstart, tstop, units='UTC hr'):
+    def check_time_units(self, units='UTC'):
+        """
+        A utility for functions which checks the temporal units.
+
+        Parameters
+        ----------
+        units: str, default='UTC'
+            Temporal units.
+
+        Raises
+        ------
+        Warning if units of dimension 't' are not the same as units.
+        """
+        if ('t' in self._obj.coords) and (units != self._obj['t'].units):
+            _warnings.warn('Units on dim "t" are not recognized, should be {}'.format(units))
+
+    def set_time(self, tstart, tstop, units='UTC'):
+        """
+        Set the temporal units of the movie.
+
+        Parameters
+        ----------
+        tstart: float,
+            Start time of the observation in hours
+        tstop: float,
+            End time of the observation in hours
+        units: str, default='UTC'
+            Temporal units.
+
+        Returns
+        -------
+        movie: xr.DataArray
+            Movie with new time coordinates set.
+        """
         movie = self._obj.assign_coords(t=_np.linspace(tstart, tstop, self._obj.t.size))
         movie.t.attrs.update(units=units)
         return movie
@@ -505,6 +543,38 @@ class _ImageAccessor(object):
     """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
+
+    def to_radians(self, image_dims=['y', 'x']):
+        """
+        A utility for functions which require radian units along image dimensions.
+
+        Parameters
+        ----------
+        image_dims: [dim1, dim2], default=['y', 'x'],
+            Image data dimensions.
+        coords: xr.Coordinates,
+            Input xr.Coordinates with
+
+        Returns
+        -------
+        coords: xr.DataArray or xr.Dataset,
+            DataArray or Dataset with image_dims coordinates converted to radians.
+
+        Raises
+        ------
+        Warning if units are not: 'rad', 'uas', 'as'.
+        """
+        unit_conversion = {'as': 4.848136811094136e-06, 'uas': 4.848136811094136e-12}
+        output = self._obj.copy()
+        for dim in image_dims:
+            dim_units = output[dim].units
+            if (dim_units == 'as') or (dim_units == 'uas'):
+                output[dim] = _xr.DataArray(output[dim] * unit_conversion[dim_units], attrs={'units': 'rad'})
+            elif (dim_units == 'rad'):
+                continue
+            else:
+                _warnings.warn('Units not recognized (should be rad/as/uas). Assuming rad units')
+        return output
 
     def set_fov(self, fov, image_dims=['y', 'x'],):
         """
