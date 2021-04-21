@@ -17,7 +17,7 @@ import pynoisy.linalg as _linalg
 import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
-def compute_pixel_loss(modes, measurements, damp=0.0):
+def compute_pixel_loss(subspace, measurements, damp=0.0):
     """
     Compute projection residual of the *direct pixel measurements* onto the subspace.
     The function solves ``min ||Ax - b||^2`` or the damped version: ``min ||Ax - b||^2 + d^2 ||x||^2``,
@@ -25,8 +25,8 @@ def compute_pixel_loss(modes, measurements, damp=0.0):
 
     Parameters
     ----------
-    modes: xr.Dataset,
-        A lazy loaded (dask array data) Dataset with the computed eigenvectors and eigenvalues as a function of 'degree'
+    subspace: xr.Dataset,
+        A lazy loaded (dask array data) Dataset with the computed modes as a function of 'degree'
         and manifold dimensions. To load a dataset from  use: modes = xr.open_mfdataset('directoy/*.nc')
     measurements: xr.DataArray,
         An input DataArray with direct pixel measurements.
@@ -44,7 +44,6 @@ def compute_pixel_loss(modes, measurements, damp=0.0):
     -----
     To avoid memory overload subspace is deleted and garbage collected.
     """
-    subspace = modes.eigenvalues * modes.eigenvectors
     subspace = subspace.where(_np.isfinite(measurements))
     loss = _linalg.projection_residual(measurements, subspace, damp=damp)
 
