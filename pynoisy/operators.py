@@ -208,30 +208,39 @@ class Loss(object):
 
     Parameters
     ----------
-    datafit_ops: ,
-        Data-fit operators which implemnt
+    data_ops: pynoisy.operators.LossOperator or list of pynoisy.operators.LossOperator,
+        Data-fit operators which implement: `__call__(self, x)` and `gradient(self, x)`.
+    data_weights: float or list of float,
+        Weights for the data-terms. Should be same length as data_ops.
+    reg_ops: pynoisy.operators.LossOperator or list of pynoisy.operators.LossOperator, optional.
+        Regularization operators which implement: `__call__(self, x)` and `gradient(self, x)`.
+    reg_weights: float or list of float,
+        Weights for the regularization-terms. Should be same length reg_ops data_ops.
     """
-    def __init__(self, datafit_ops, datafit_weights, regularize_ops, regularize_weights):
-        self.datafit_ops = _np.atleast_1d(datafit_ops)
-        self.datafit_w = _np.atleast_1d(datafit_weights)
-        if len(self.datafit_ops) != len(self.datafit_w):
-            raise AttributeError('len(datafit_ops) != len(datafit_weights)')
+    def __init__(self, data_ops, data_weights, reg_ops=None, reg_weights=None):
+        self.data_ops = _np.atleast_1d(data_ops)
+        self.data_weights = _np.atleast_1d(data_weights)
+        if len(self.data_ops) != len(self.data_weights):
+            raise AttributeError('len(data_ops) != len(data_weights)')
 
-        self.regularize_ops = _np.atleast_1d(regularize_ops)
-        self.regularize_w = _np.atleast_1d(regularize_weights)
-        if len(self.regularize_ops) != len(self.regularize_w):
-            raise AttributeError('len(regularize_ops) != len(regularize_weights)')
+        self.reg_ops = _np.atleast_1d(reg_ops)
+        self.reg_weights = _np.atleast_1d(reg_weights)
+        if len(self.reg_ops) != len(self.reg_weights):
+            raise AttributeError('len(reg_ops) != len(reg_weights)')
 
     def __call__(self, x):
-        datafit_loss = _np.sum([w * data_op(x) for data_op, w in zip(self.datafit_ops, self.datafit_w)])
-        regularize_loss = _np.sum([w * reg_op(x) for reg_op, w in zip(self.regularize_ops, self.regularize_w)])
-        return datafit_loss + regularize_loss
+        loss = _np.sum([w * data_op(x) for data_op, w in zip(self.data_ops, self.data_weights)])
+        for reg_op, w in zip(self.reg_ops, self.reg_weights):
+            if (reg_op is not None) and (w is not None):
+                loss += w * reg_op(x)
+        return loss
 
     def jac(self, x):
-        datafit_grad = _np.sum([w * data_op.gradient(x) for data_op, w in zip(self.datafit_ops, self.datafit_w)], axis=0)
-        regularize_grad = _np.sum([w * reg_op.gradient(x) for reg_op, w in zip(self.regularize_ops, self.regularize_w)],
-                                 axis=0)
-        return (datafit_grad + regularize_grad).real.astype(_np.float64)
+        grad = _np.sum([w * data_op.gradient(x) for data_op, w in zip(self.data_ops, self.data_weights)], axis=0)
+        for reg_op, w in zip(self.reg_ops, self.reg_weights):
+            if (reg_op is not None) and (w is not None):
+                grad += w * reg_op.gradient(x)
+        return grad.real.astype(_np.float64)
 
 class LossOperator(object):
     """
@@ -255,10 +264,6 @@ class L2LossOp(LossOperator):
         A 1D numpy array with measurement values.
     forwardOp: LinearOperator,
         A LinearOperator which implements: `_matvec(self, x)` and `_rmatvec(self, x)` (see [1])
-
-    References
-    ----------
-    [1] https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html
     """
     def __init__(self, measurements, forwardOp):
         self.measurements = measurements
@@ -268,7 +273,17 @@ class L2LossOp(LossOperator):
         return _np.sum(_np.abs(self.measurements - self.forwardOp * x) ** 2)
 
     def gradient(self, x):
-        return self.forwardOp.H * (self.forwardOp * x - self.measurements)
+        return 2 * self.forwardOp.H * (self.forwardOp * x - self.measurements)
+
+class L2RegOp(LossOperator):
+    """
+    An l2 regularization LossOperator implementing the computation and gradient of ||x||^2
+    """
+    def __call__(self, x):
+        return _np.sum(_np.abs(x) ** 2)
+
+    def gradient(self, x):
+        return 2 * x
 
 class MEMRegOp(LossOperator):
     """
@@ -287,10 +302,10 @@ class MEMRegOp(LossOperator):
         self.prior = prior
 
     def __call__(self, x):
-        return -_np.sum(x * _np.log((x + self.eps) / (self.prior + self.eps)))
+        return _np.sum(x * _np.log((x + self.eps) / (self.prior + self.eps)))
 
     def gradient(self, x):
-        return -_np.log((x + self.eps) / (self.prior + self.eps)) - 1
+        return _np.log((x + self.eps) / (self.prior + self.eps)) + 1
 
 class FluxRegOp(LossOperator):
     """
