@@ -17,6 +17,47 @@ import pynoisy.linalg as _linalg
 import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
+def compute_visibilities_loss(subspace, measurements, obs, fft_pad_factor=2, damp=0.0):
+    """
+    Compute projection residual of the *complex visibility measurements* onto the EHT observations of the subspace.
+    The function solves ``min ||S(F(A))x - b||^2`` or the damped version: ``min ||S(F(A))x - b||^2 + d^2 ||x||^2``,
+    where S(F(A)) is the eht sampled Fourier transform of A, b is the input vector and d is the damping factor.
+
+    Parameters
+    ----------
+    subspace: xr.Dataset,
+        A lazy loaded (dask array data) Dataset with the computed modes as a function of 'degree'
+        and manifold dimensions. To load a dataset from  use: modes = xr.open_mfdataset('directoy/*.nc')
+    measurements: xr.DataArray,
+        An input DataArray with direct pixel measurements.
+    obs: ehtim.Obsdata
+        ehtim Observation object
+    fft_pad_factor: float
+        Padding factor for increased fft resolution.
+    damp: float, default=0.0
+        Damping of the least-squares problem. This is a weight on the coefficients l2 norm: damp^2 * ||x||^2
+
+    Returns
+    -------
+    loss_dataset: xr.Dataset
+        A Dataset computed at every manifold grid point with variables:
+            'data'=||S(F(A))x - b||^2 ,
+            'total'=||S(F(A))x - b||^2 + d^2 ||x*||^2.
+
+    Notes
+    -----
+    To avoid memory overload subspace is deleted and garbage collected.
+    """
+    subspace = subspace.utils_observe.block_observe_same_nonoise(obs, fft_pad_factor=fft_pad_factor)
+    loss = _linalg.projection_residual(measurements, subspace, damp=damp)
+
+    # Release memory
+    del subspace
+    _gc.collect()
+
+    return loss
+
+@_utils.mode_map('Dataset', ['total', 'data'])
 def compute_pixel_loss(subspace, measurements, damp=0.0):
     """
     Compute projection residual of the *direct pixel measurements* onto the subspace.
