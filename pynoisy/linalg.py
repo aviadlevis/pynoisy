@@ -241,8 +241,8 @@ def projection_residual(vector, subspace, damp=0.0, return_projection=False, ret
     result = lsqr_projection(vector, projection_matrix, damp, return_projection, return_coefs)
     residual = _xr.Dataset(data_vars={'data':result[0], 'total':result[1]}, attrs={'damp': damp})
 
-    # Expand dataset coordinates which are not: 'degree', 't', 'y', 'x'
-    dim_names = list(set(subspace.coords) - set(['degree', 't', 'y', 'x']))
+    # Expand dataset coordinates which are not the measurements coordinates or degree
+    dim_names = list(set(subspace.coords) - set(vector.coords) - set(['degree']))
     dims = dict([(dim, [float(subspace.coords[dim])]) for dim in dim_names])
     residual = residual.expand_dims(dims)
 
