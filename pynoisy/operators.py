@@ -113,15 +113,12 @@ def dottest(Op, tol=1e-6, complexflag=0, raiseerror=True, verb=False):
 
 class ModulateOp(_LinearOperator):
     """
-    Envelope modulation Operator in the form of scipy.sparse.linalg.LinearOperator object.
-    The forward call is equivalent to pynoisy.forward.modulate().
-
+    Envelope modulation Operator in the form of scipy.sparse.linalg.LinearOperator object..
+        output = modulation * envelope
     Parameters
     ----------
-    grf: xr.DataArray
-        Output DataArray GRF with dims ['t', 'y', 'x'].
-    alpha: float, default=1.0
-        Exponential rate
+    modulation: xr.DataArray
+        Modulation DaraArray with dimensions: ['t', 'y', 'x'].
     dtype: datatype, default=np.float64
     """
     def __init__(self, modulation, dtype=_np.float64):
@@ -268,7 +265,7 @@ class L2LossOp(LossOperator):
     """
     def __init__(self, measurements, forwardOp, weight=1.0):
         super().__init__(weight=weight)
-        self.measurements = measurements
+        self.measurements = _np.array(measurements).ravel()
         self.forwardOp = forwardOp
 
     def __call__(self, x):
