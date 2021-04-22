@@ -307,7 +307,7 @@ def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=T
 
     return decorator
 
-@_xr.register_dataarray_accessor("fourier")
+@_xr.register_dataarray_accessor("utils_fourier")
 class _FourierAccessor(object):
     """
     Register a custom accessor FourierAccessor on xarray.DataArray object.
@@ -411,7 +411,7 @@ class _FourierAccessor(object):
         -----
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
-        movies = self._obj.squeeze()
+        movies = self._obj
 
         # Pad images according to pad factor (interpolation in Fourier space)
         ny, nx = movies[image_dims[0]].size, movies[image_dims[1]].size

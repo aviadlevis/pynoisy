@@ -142,9 +142,9 @@ class _ObserveAccessor(object):
 
         psize = movies.utils_image.psize
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
-        fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims)
-        fft *= fft.fourier._trianglePulse2D(fft.u, fft.v, psize) * \
-               fft.fourier._extra_phase(fft.u, fft.v, psize, image_dim_sizes)
+        fft = movies.utils_fourier.fft(fft_pad_factor, image_dims, fft_dims)
+        fft *= fft.utils_fourier._trianglePulse2D(fft.u, fft.v, psize) * \
+               fft.utils_fourier._extra_phase(fft.u, fft.v, psize, image_dim_sizes)
 
         if ('r' in fft.coords) and ('theta' in fft.coords):
             fft = fft.utils_polar.add_coords(image_dims=['u', 'v'])
@@ -180,7 +180,7 @@ class _ObserveAccessor(object):
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/movie.py#L981
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/observing/obs_simulate.py#L182
         """
-        movies = self._obj.squeeze().utils_image.to_radians(image_dims)
+        movies = self._obj.utils_image.to_radians(image_dims)
         movies.utils_movie.check_time_units(obs.timetype)
 
         fft_dims = ['u', 'v']
@@ -188,7 +188,7 @@ class _ObserveAccessor(object):
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
         psize = movies.utils_image.psize
 
-        fft = movies.fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
+        fft = movies.utils_fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
 
         obslist = obs.tlist()
         u = _np.concatenate([obsdata['u'] for obsdata in obslist])
@@ -196,8 +196,8 @@ class _ObserveAccessor(object):
         t = _np.concatenate([obsdata['time'] for obsdata in obslist])
 
         # Extra phase to match centroid convention
-        pulsefac = fft.fourier._trianglePulse2D(u, v, psize)
-        phase = fft.fourier._extra_phase(u, v, psize, image_dim_sizes)
+        pulsefac = fft.utils_fourier._trianglePulse2D(u, v, psize)
+        phase = fft.utils_fourier._extra_phase(u, v, psize, image_dim_sizes)
 
         fft = fft.assign_coords(u2=(fft_dims[0], range(fft[fft_dims[0]].size)),
                                 v2=(fft_dims[1], range(fft[fft_dims[1]].size)))
@@ -213,9 +213,12 @@ class _ObserveAccessor(object):
             vis = visre + 1j * visim
             visibilities = _xr.DataArray(vis * phase * pulsefac, dims='index')
 
-        elif fft.ndim == 4:
+        elif fft.ndim > 3:
             # Sample block Fourier on tuv coordinates of the observations
             # Note: using np.ascontiguousarray preforms ~twice as fast
+            # Concatenate first axis as a block
+            fft_shape = fft.shape
+            fft = fft.data.reshape(-1, *fft_shape[-3:])
             num_block = fft.shape[0]
             num_vis = len(t)
             visibilities = _np.empty(shape=(num_block, num_vis), dtype=_np.complex128)
@@ -225,10 +228,10 @@ class _ObserveAccessor(object):
                 vis = visre + 1j * visim
                 visibilities[i] = vis * phase * pulsefac
 
-            visibilities = _xr.DataArray(visibilities,
-                                         dims=[movies.dims[0], 'index'],
-                                         coords={movies.dims[0]: movies.coords[movies.dims[0]],
-                                                'index': range(num_vis)})
+            dims = movies.dims[:-3] + ('index',)
+            coords = dict(zip(movies.dims[:-3], [movies.coords[dim] for dim in movies.dims[:-3]]))
+            visibilities = _xr.DataArray(visibilities.reshape(*fft_shape[:-3], num_vis), dims=dims, coords=coords)
+
         else:
             raise ValueError("unsupported number of dimensions: {}".format(fft.ndim))
 
