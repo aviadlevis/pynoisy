@@ -427,8 +427,10 @@ class _FourierAccessor(object):
         psize = movies.utils_image.psize
         freqs = _np.fft.fftshift(_np.fft.fftfreq(n=padded_movies[image_dims[0]].size, d=psize))
         fft = _np.fft.fftshift(_np.fft.fft2(_np.fft.ifftshift(padded_movies)))
-
         fft = _xr.DataArray(fft, coords=padded_movies.coords)
+
+        del padded_movies
+
         for image_dim, fft_dim in zip(image_dims, fft_dims):
             fft = fft.swap_dims({image_dim: fft_dim}).drop(image_dim).assign_coords({fft_dim: freqs})
             fft[fft_dim].attrs.update(inverse_units=movies[image_dim].units)
