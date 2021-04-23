@@ -17,7 +17,7 @@ import pynoisy.linalg as _linalg
 import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
-def compute_visibilities_loss(subspace, measurements, obs, fft_pad_factor=2, damp=0.0):
+def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, fft_pad_factor=2, damp=0.0):
     """
     Compute projection residual of the *complex visibility measurements* onto the EHT observations of the subspace.
     The function solves ``min ||S(F(A))x - b||^2`` or the damped version: ``min ||S(F(A))x - b||^2 + d^2 ||x||^2``,
@@ -49,6 +49,11 @@ def compute_visibilities_loss(subspace, measurements, obs, fft_pad_factor=2, dam
     To avoid memory overload subspace is deleted and garbage collected.
     """
     subspace = subspace.utils_observe.block_observe_same_nonoise(obs, fft_pad_factor=fft_pad_factor)
+
+    if uncertainties is not None:
+        subspace = subspace / _np.array(uncertainties)
+        measurements = measurements / _np.array(uncertainties)
+
     loss = _linalg.projection_residual(measurements, subspace, damp=damp)
 
     # Release memory

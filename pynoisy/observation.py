@@ -11,6 +11,7 @@ import numpy as _np
 import matplotlib.pyplot as _plt
 import scipy.ndimage as _nd
 import ehtim as _eh
+import ehtim.const_def as _ehc
 
 def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
     """
@@ -59,11 +60,109 @@ def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=Tr
     ax.set_aspect('equal')
     _plt.tight_layout()
 
-def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278148651123,
-                      ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850,
-                      bw=1856000000.0, timetype='UTC', polrep='stokes', source='SYNTHETIC'):
+def obs_to_xarray(obs):
     """
-    Generate synthetic ehtim.Observation from an array configuration and time constraints
+    Generate an xr.Dataset from an ehtim.Observation object.
+
+    Parameters
+    ----------
+    obs: ehtim.Observation
+        An Observation object with 'vis' (visibilities) and 'sigma' (uncertainties).
+
+    Returns
+    -------
+    visibilities: xr.Dataset
+        Dataset of 'vis' and 'sigma'.
+
+    """
+    obslist = obs.tlist()
+    u = _np.concatenate([obsdata['u'] for obsdata in obslist])
+    v = _np.concatenate([obsdata['v'] for obsdata in obslist])
+    t = _np.concatenate([obsdata['time'] for obsdata in obslist])
+    visibilities = _xr.Dataset({'vis': ('index', obs.data['vis']), 'sigma': ('index', obs.data['sigma'])},
+                               coords={'t': ('index', t), 'u': ('index', v), 'v': ('index', u),
+                                       'uvdist': ('index', _np.sqrt(u ** 2 + v ** 2))})
+    return visibilities
+
+def observe_same(movie, obs, ttype='nfft', output_path='./caltable', thermal_noise=True, station_noise=False,
+                 dterm_noise=False, sigmat=0.25, seed=False):
+    """
+    Generate an Obeservation object from the movie and add noise.
+
+    Parameters
+    ----------
+    movie: ehtim.Movie or xr.DataArray
+        Input movie. If the movie is an xr.DataArray object it is transformed into an ehtim.Movie first.
+    obs: ehtim.Observation
+        An (empty) Observation object
+    output_path: str
+        Output path for caltable
+    thermal_noise: bool
+        False for no thermal noise noise
+    station_noise: bool,
+        True for station based gain and phase errors
+    dterm_noise: bool,
+        True for dterm noise
+    sigmat: float,
+        Correlation time for random station based errors
+    seed: int, default=6
+        Seed for the random number generators, uses system time if False
+
+    Returns
+    -------
+    obs: ehtim.Observation
+        Observation object with visibilties of the input movie.
+    """
+    if isinstance(movie, _xr.DataArray):
+        movie = movie.utils_observe.to_ehtim(source='SYNTHETIC')
+    elif isinstance(movie, _eh.movie.Movie):
+        pass
+    else:
+        raise AttributeError('Movie datatype ({}) not recognized.'.format(movie.__class__))
+
+    # these gains are approximated from the EHT 2017 data
+    # the standard deviation of the absolute gain of each telescope from a gain of 1
+    GAIN_OFFSET = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15,
+                   'SR': 0.0}
+    GAINP = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
+
+    stabilize_scan_phase = True  # If true then add a single phase error for each scan to act similar to adhoc phasing
+    stabilize_scan_amp = True    # If true then add a single gain error at each scan
+    jones = True                 # Jones matrix corruption & calibration
+    inv_jones = True             # Invert the jones matrix
+    frcal = True                 # True if you do not include effects of field rotation
+    dcal = not dterm_noise       # True if you do not include the effects of leakage
+    if dterm_noise:
+        dterm_offset = 0.05      # Random offset of D terms is given at each site with this std away from 1
+    else:
+        dterm_offset = _ehc.DTERMPDEF
+    neggains = False
+    if station_noise:
+        ampcal = False          # If False, time-dependent gaussian errors are added to station gains
+        phasecal = False        # If False, time-dependent station-based random phases are added
+        rlgaincal = False       # If False, time-dependent gains are not equal for R and L pol
+        gain_offset = GAIN_OFFSET
+        gainp = GAINP
+    else:
+        ampcal = True
+        phasecal = True
+        rlgaincal = True
+        gain_offset = _ehc.GAINPDEF
+        gainp = _ehc.GAINPDEF
+    movie.rf = obs.rf
+    obs = movie.observe_same(obs, ttype=ttype, add_th_noise=thermal_noise, ampcal=ampcal, phasecal=phasecal,
+                             stabilize_scan_phase=stabilize_scan_phase, stabilize_scan_amp=stabilize_scan_amp,
+                             gain_offset=gain_offset, gainp=gainp, jones=jones, inv_jones=inv_jones,
+                             dcal=dcal, frcal=frcal, rlgaincal=rlgaincal, neggains=neggains,
+                             dterm_offset=dterm_offset, caltable_path=output_path, seed=seed, sigmat=sigmat)
+
+    return obs
+
+def empty_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278148651123,
+                  ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850,
+                  bw=1856000000.0, timetype='UTC', polrep='stokes'):
+    """
+    Generate an empty ehtim.Observation from an array configuration and time constraints
 
     Parameters
     ----------
@@ -90,8 +189,6 @@ def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278
         How to interpret tstart and tstop; either 'GMST' or 'UTC'
     polrep: sting, default='stokes',
         Polarization representation, either 'stokes' or 'circ'
-    source: str, default='SYNTHETIC',
-        Source name
 
     Returns
     -------
@@ -101,7 +198,6 @@ def synthetic_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278
     tadv = (tstop - tstart) * 3600.0 / nt
     obs = array.obsdata(ra=ra, dec=dec, rf=rf, bw=bw, tint=tint, tadv=tadv, tstart=tstart, tstop=tstop, mjd=mjd,
                         timetype=timetype, polrep=polrep)
-    obs.source = 'SYNTHETIC'
     return obs
 
 @_xr.register_dataarray_accessor("utils_observe")
