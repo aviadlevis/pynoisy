@@ -17,7 +17,8 @@ import pynoisy.linalg as _linalg
 import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
-def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, fft_pad_factor=2, damp=0.0):
+def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, fft_pad_factor=2, damp=0.0,
+                              max_mbs=250.0):
     """
     Compute projection residual of the *complex visibility measurements* onto the EHT observations of the subspace.
     The function solves ``min ||S(F(A))x - b||^2`` or the damped version: ``min ||S(F(A))x - b||^2 + d^2 ||x||^2``,
@@ -36,6 +37,9 @@ def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, f
         Padding factor for increased fft resolution.
     damp: float, default=0.0
         Damping of the least-squares problem. This is a weight on the coefficients l2 norm: damp^2 * ||x||^2
+    max_mbs: float, default=300.0
+        Maximum number of Megabytes to allocate for fft. If fft exceeds this an attempt to loop over non-spatial
+        direction is made
 
     Returns
     -------
@@ -48,8 +52,7 @@ def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, f
     -----
     To avoid memory overload subspace is deleted and garbage collected.
     """
-    subspace = subspace.utils_observe.block_observe_same_nonoise(obs, fft_pad_factor=fft_pad_factor)
-
+    subspace = subspace.utils_observe.block_observe_same_nonoise(obs, fft_pad_factor=fft_pad_factor, max_mbs=max_mbs)
     if uncertainties is not None:
         subspace = subspace / _np.array(uncertainties)
         measurements = measurements / _np.array(uncertainties)

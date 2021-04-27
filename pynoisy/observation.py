@@ -8,10 +8,12 @@ References
 """
 import xarray as _xr
 import numpy as _np
+import gc as _gc
 import matplotlib.pyplot as _plt
 import scipy.ndimage as _nd
 import ehtim as _eh
 import ehtim.const_def as _ehc
+import pynoisy.utils as _utils
 
 def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
     """
@@ -158,7 +160,7 @@ def observe_same(movie, obs, ttype='nfft', output_path='./caltable', thermal_noi
 
     return obs
 
-def empty_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.465278148651123,
+def empty_eht_obs(array, nt, tint, tstart=4.0, tstop=15.5,
                   ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850,
                   bw=1856000000.0, timetype='UTC', polrep='stokes'):
     """
@@ -195,7 +197,7 @@ def empty_eht_obs(array, nt, tint, tstart=4.045833349227905, tstop=15.4652781486
     obs: ehtim.Obsdata
         ehtim Observation object
     """
-    tadv = (tstop - tstart) * 3600.0 / nt
+    tadv = (tstop - tstart) * 3600.0/ nt
     obs = array.obsdata(ra=ra, dec=dec, rf=rf, bw=bw, tint=tint, tadv=tadv, tstart=tstart, tstop=tstop, mjd=mjd,
                         timetype=timetype, polrep=polrep)
     return obs
@@ -246,7 +248,7 @@ class _ObserveAccessor(object):
             fft = fft.utils_polar.add_coords(image_dims=['u', 'v'])
         return fft
 
-    def block_observe_same_nonoise(self, obs, fft_pad_factor=2, image_dims=['y', 'x']):
+    def block_observe_same_nonoise(self, obs, fft_pad_factor=2, image_dims=['y', 'x'], max_mbs=1000.0):
         """
         Modification of ehtim's observe_same_nonoise method for a block of movies.
 
@@ -258,6 +260,9 @@ class _ObserveAccessor(object):
             Padding factor for increased fft resolution.
         image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
+        max_mbs: float, default=300.0
+            Maximum number of Megabytes to allocate for fft. If fft exceeds this an attempt to loop over non-spatial
+            direction is made
 
         Returns
         -------
@@ -280,60 +285,96 @@ class _ObserveAccessor(object):
         movies.utils_movie.check_time_units(obs.timetype)
 
         fft_dims = ['u', 'v']
-
-        image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
         psize = movies.utils_image.psize
+        image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
 
-        fft = movies.utils_fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
 
-        obslist = obs.tlist()
-        u = _np.concatenate([obsdata['u'] for obsdata in obslist])
-        v = _np.concatenate([obsdata['v'] for obsdata in obslist])
-        t = _np.concatenate([obsdata['time'] for obsdata in obslist])
+        # Check if fft fits in memory or split into chunks
+        mbs = 1e-6
+        fft_size = _np.prod(movies.shape) * _utils.next_power_of_two(fft_pad_factor) ** 2
+        fft_size_mbs = fft_size * _np.dtype(_np.complex).itemsize * mbs
 
-        # Extra phase to match centroid convention
-        pulsefac = fft.utils_fourier._trianglePulse2D(u, v, psize)
-        phase = fft.utils_fourier._extra_phase(u, v, psize, image_dim_sizes)
+        # Split into chunks along largest dimension which is not a movie dimension
+        other_dims = list(set(movies.sizes) - set(image_dims) - set(['t']))
 
-        fft = fft.assign_coords(u2=(fft_dims[0], range(fft[fft_dims[0]].size)),
-                                v2=(fft_dims[1], range(fft[fft_dims[1]].size)))
-        tuv2 = _np.vstack((fft.v2.interp({fft_dims[1]: v}), fft.u2.interp({fft_dims[0]: u})))
+        num_chunks = 1
+        if (fft_size_mbs > max_mbs):
+            if (not other_dims):
+                raise AttributeError('Not enough space for fft: fft_size_mbs={}, max_mbs={}'.format(fft_size_mbs, max_mbs))
+            else:
+                split_dim = other_dims[_np.argmax([movies.sizes[dim] for dim in other_dims])]
+                split_dim_size = movies.sizes[split_dim]
+                chunk_size = min(int(split_dim_size / (fft_size_mbs / max_mbs)), split_dim_size)
+                num_chunks = int(_np.ceil(split_dim_size / chunk_size))
 
-        if 't' in fft.coords:
-            fft = fft.assign_coords(t2=('t', range(fft.t.size)))
-            tuv2 = _np.vstack((fft.t2.interp(t=t), tuv2))
+        output = []
+        for i in range(num_chunks):
+            if num_chunks == 1:
+                fft = movies.utils_fourier.fft(fft_pad_factor, image_dims, fft_dims=fft_dims)
+            elif num_chunks > 1:
+                fft = movies.isel({split_dim: slice(i * chunk_size, (i + 1) * chunk_size)}).utils_fourier.fft(
+                    fft_pad_factor, image_dims, fft_dims=fft_dims)
+            else:
+                raise AttributeError('illegal num_chunks')
 
-        if (fft.ndim == 2) or (fft.ndim == 3):
-            visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fft).data), tuv2)
-            visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fft).data), tuv2)
-            vis = visre + 1j * visim
-            visibilities = _xr.DataArray(vis * phase * pulsefac, dims='index')
+            obslist = obs.tlist()
+            u = _np.concatenate([obsdata['u'] for obsdata in obslist])
+            v = _np.concatenate([obsdata['v'] for obsdata in obslist])
+            t = _np.concatenate([obsdata['time'] for obsdata in obslist])
 
-        elif fft.ndim > 3:
-            # Sample block Fourier on tuv coordinates of the observations
-            # Note: using np.ascontiguousarray preforms ~twice as fast
-            # Concatenate first axis as a block
-            fft_shape = fft.shape
-            fft = fft.data.reshape(-1, *fft_shape[-3:])
-            num_block = fft.shape[0]
-            num_vis = len(t)
-            visibilities = _np.empty(shape=(num_block, num_vis), dtype=_np.complex128)
-            for i, fourier in enumerate(fft):
-                visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fourier).data), tuv2)
-                visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fourier).data), tuv2)
+            # Extra phase to match centroid convention
+            pulsefac = fft.utils_fourier._trianglePulse2D(u, v, psize)
+            phase = fft.utils_fourier._extra_phase(u, v, psize, image_dim_sizes)
+
+            fft = fft.assign_coords(u2=(fft_dims[0], range(fft[fft_dims[0]].size)),
+                                    v2=(fft_dims[1], range(fft[fft_dims[1]].size)))
+            tuv2 = _np.vstack((fft.v2.interp({fft_dims[1]: v}), fft.u2.interp({fft_dims[0]: u})))
+
+            if 't' in fft.coords:
+                fft = fft.assign_coords(t2=('t', range(fft.t.size)))
+                tuv2 = _np.vstack((fft.t2.interp(t=t), tuv2))
+
+            if (fft.ndim == 2) or (fft.ndim == 3):
+                visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fft).data), tuv2)
+                visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fft).data), tuv2)
                 vis = visre + 1j * visim
-                visibilities[i] = vis * phase * pulsefac
+                visibilities = _xr.DataArray(vis * phase * pulsefac, dims='index')
 
-            dims = movies.dims[:-3] + ('index',)
-            coords = dict(zip(movies.dims[:-3], [movies.coords[dim] for dim in movies.dims[:-3]]))
-            visibilities = _xr.DataArray(visibilities.reshape(*fft_shape[:-3], num_vis), dims=dims, coords=coords)
+            elif fft.ndim > 3:
+                # Sample block Fourier on tuv coordinates of the observations
+                # Note: using np.ascontiguousarray preforms ~twice as fast
+                # Concatenate first axis as a block
+                fft_shape = fft.shape
+                fft = fft.data.reshape(-1, *fft_shape[-3:])
+                num_block = fft.shape[0]
+                num_vis = len(t)
+                visibilities = _np.empty(shape=(num_block, num_vis), dtype=_np.complex128)
+                for k, fourier in enumerate(fft):
+                    visre = _nd.map_coordinates(_np.ascontiguousarray(_np.real(fourier).data), tuv2)
+                    visim = _nd.map_coordinates(_np.ascontiguousarray(_np.imag(fourier).data), tuv2)
+                    vis = visre + 1j * visim
+                    visibilities[k] = vis * phase * pulsefac
 
-        else:
-            raise ValueError("unsupported number of dimensions: {}".format(fft.ndim))
+                dims = movies.dims[:-3] + ('index',)
+                coords = dict(zip(movies.dims[:-3], [movies.coords[dim] for dim in movies.dims[:-3]]))
+                if num_chunks > 1:
+                    coords[split_dim] = movies.isel(
+                        {split_dim: slice(i * chunk_size, (i + 1) * chunk_size)}).coords[split_dim]
 
-        visibilities = visibilities.assign_coords(
-            t=('index', t), u=('index', v), v=('index', u), uvdist=('index', _np.sqrt(u**2 + v**2)))
-        visibilities.attrs.update(fft_pad_factor=fft_pad_factor, source=obs.source)
+                visibilities = _xr.DataArray(visibilities.reshape(*fft_shape[:-3], num_vis), dims=dims, coords=coords)
+
+            else:
+                raise ValueError("unsupported number of dimensions: {}".format(fft.ndim))
+
+            visibilities = visibilities.assign_coords(
+                t=('index', t), u=('index', v), v=('index', u), uvdist=('index', _np.sqrt(u**2 + v**2)))
+            visibilities.attrs.update(fft_pad_factor=fft_pad_factor, source=obs.source)
+            output.append(visibilities)
+
+            del fft
+            _gc.collect()
+
+        visibilities = _xr.concat(output, dim=split_dim) if num_chunks > 1 else output[0]
         return visibilities
 
     def to_ehtim(self, ra=17.761121055553343, dec=-29.00784305556, rf=226191789062.5, mjd=57850, source='SGRA',

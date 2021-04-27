@@ -8,6 +8,7 @@ from ipywidgets import fixed as _fixed, interactive as _interactive
 from IPython.display import display as _display
 import h5py as _h5py
 import os as _os
+import gc as _gc
 import warnings as _warnings
 from pathlib import Path as _Path
 import inspect as _inspect
@@ -429,7 +430,9 @@ class _FourierAccessor(object):
         fft = _np.fft.fftshift(_np.fft.fft2(_np.fft.ifftshift(padded_movies)))
         fft = _xr.DataArray(fft, coords=padded_movies.coords)
 
+        # Delete padded movies for memory utilization
         del padded_movies
+        _gc.collect()
 
         for image_dim, fft_dim in zip(image_dims, fft_dims):
             fft = fft.swap_dims({image_dim: fft_dim}).drop(image_dim).assign_coords({fft_dim: freqs})
