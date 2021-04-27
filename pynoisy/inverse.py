@@ -17,7 +17,7 @@ import pynoisy.linalg as _linalg
 import pynoisy.utils as _utils
 
 @_utils.mode_map('Dataset', ['total', 'data'])
-def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, fft_pad_factor=2, damp=0.0,
+def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, fft_pad_factor=1, damp=0.0,
                               max_mbs=250.0):
     """
     Compute projection residual of the *complex visibility measurements* onto the EHT observations of the subspace.
@@ -33,7 +33,9 @@ def compute_visibilities_loss(subspace, measurements, obs, uncertainties=None, f
         An input DataArray with direct pixel measurements.
     obs: ehtim.Obsdata
         ehtim Observation object
-    fft_pad_factor: float
+    uncertainties: np.array or scalar, Default=None
+        If None covariance is  assumed to be a diagonal identity matrix.
+    fft_pad_factor: float, default=1
         Padding factor for increased fft resolution.
     damp: float, default=0.0
         Damping of the least-squares problem. This is a weight on the coefficients l2 norm: damp^2 * ||x||^2
