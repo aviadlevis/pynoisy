@@ -20,7 +20,7 @@ import time as _time
 from scipy.special import gamma as _gamma
 
 class HGRFSolver(object):
-    solver_list = ['PCG', 'SMG']
+    solver_list = ['PCG', 'SMG', 'Inverse']
     def __init__(self, advection, diffusion, nt, evolution_length=100.0,  t_units='GM/c^3', forcing_strength=1.0, seed=None, num_solvers=1,
                  solver_type='PCG', executable='matrices'):
         """
@@ -236,7 +236,7 @@ class HGRFSolver(object):
 
         Notes
         -----
-        For positive nprocs the product should equal the number of jobs: nprox*nproxy*nproxt = n_jobs.
+        For nprocs>0 the product should equal the number of jobs: nprox*nproxy*nproxt = n_jobs.
         """
         seed = self.seed if seed is None else seed
         if source is None:
@@ -251,7 +251,7 @@ class HGRFSolver(object):
         # Save parameters to file (loaded within HYPRE)
         self.to_netcdf(self._param_file.name)
         n_jobs, proccesing_cmd = self._parallel_processing_cmd(n_jobs, nprocx, nprocy, nproct)
-        cmd = ['mpiexec', '-n', str(n_jobs), str(self.params.executable.data), '-seed', str(seed),  '-tol', str(tol),
+        cmd = ['mpiexec', '-n', str(n_jobs), self.executable, '-seed', str(seed),  '-tol', str(tol),
                '-maxiter', str(maxiter), '-verbose', str(int(verbose)), '-nrecur', str(nrecur),
                '-dump', '-params', self._param_file.name, '-solver', str(self.params.solver_id.data), '-tend',
                str(self.evolution_length), '-x1start', str(self.x[0].data), '-x2start',  str(self.y[0].data),
@@ -268,9 +268,10 @@ class HGRFSolver(object):
             source.attrs.update(attrs)
 
         # Transpose source x,y coordinates for HYPRE (k, j, i) = (t, x, y)
+        source = source.expand_dims('sample') if 'sample' not in source.dims else source
         source = source.transpose('sample', 't', 'x', 'y')
 
-        if self.params.num_solvers == 1:
+        if self.num_solvers == 1:
             output_dir = _os.path.dirname(self._output_file.name)
             output_filename = _os.path.relpath(self._output_file.name, output_dir)
             cmd.extend(['-source', self._src_file.name, '-output', output_dir, '-filename', output_filename])
@@ -282,7 +283,7 @@ class HGRFSolver(object):
 
         # Parallel processing: this is a parallelization layer on top of the MPI.
         # i.e. multiple solvers each splitting the medium according to n_jobs
-        elif self.params.num_solvers > 1:
+        elif self.num_solvers > 1:
 
             def _parallel_run(cmd, source, sample, input_names, output_names, n_jobs):
                 file_id = _np.mod(_os.getpid(), n_jobs)
@@ -294,12 +295,12 @@ class HGRFSolver(object):
                 output = _xr.load_dataset(output_names[file_id], group='data')
                 return (sample, output)
 
-            output = _Parallel(n_jobs=int(self.params.num_solvers))(
+            output = _Parallel(n_jobs=int(self.num_solvers))(
                 _delayed(_parallel_run)(
                     cmd, source.isel(sample=sample), sample,
                     input_names=[file.name for file in self._src_file],
                     output_names=[file.name for file in self._output_file],
-                    n_jobs=int(self.params.num_solvers))
+                    n_jobs=int(self.num_solvers))
                 for sample in range(source.sample.size)
             )
 
@@ -333,6 +334,26 @@ class HGRFSolver(object):
 
         grf = output.transpose(...,'t','y','x')
         return grf
+
+    def run_inverse(self, source):
+        """
+        Run the "inverse" operation: sparse matrix (differential operators) multiplication
+
+        Parameters
+        ----------
+        source: xr.DataArray,
+            A user specified source. The source DataArray has dims ['sample', 't', 'y', 'x'] ('sample' is optional).
+            If source is not specified, a random gaussian source is used (see HGRFSolver.sample_source method)
+
+        Returns
+        -------
+        output: xr.DataArray
+            Output DataArray GRF with dims [..., 't', 'y', 'x'].
+        """
+        inverse_solver = HGRFSolver(self.advection, self.diffusion, self.nt, self.evolution_length, self.t_units,
+                                    self.forcing_strength, self.seed, self.num_solvers, 'Inverse', self.executable)
+        output = inverse_solver.run(source=source, std_scaling=False) / inverse_solver.std_scaling_factor()
+        return output
 
     def std_scaling_factor(self, nrecur=1, threshold=1e-10):
         """
@@ -459,6 +480,14 @@ class HGRFSolver(object):
     @property
     def solver_type(self):
         return str(self.params['solver_type'].data)
+
+    @property
+    def num_solvers(self):
+        return int(self.params['num_solvers'])
+
+    @property
+    def executable(self):
+        return str(self.params['executable'].data)
 
     @property
     def forcing_strength(self):
