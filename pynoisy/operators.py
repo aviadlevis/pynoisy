@@ -163,16 +163,13 @@ class ObserveOp(_LinearOperator):
         u_list = [obsdata['u'] for obsdata in obslist]
         v_list = [obsdata['v'] for obsdata in obslist]
         t_list = [obsdata[0]['time'] for obsdata in obslist]
-        t = _np.concatenate([obsdata['time'] for obsdata in obslist])
         u, v = _np.concatenate(u_list), _np.concatenate(v_list)
-        self._vis_coords = {'t': ('index', t), 'u': ('index', u), 'v': ('index', v),
-                            'uvdist': ('index', _np.sqrt(u ** 2 + v ** 2))}
         self._obstimes = t_list
         uv_per_t = _np.array([len(obsdata['v']) for obsdata in obslist])
         self._uvsplit = _np.cumsum(uv_per_t)[:-1]
 
         # Adjoint coordinates
-        self._movie_coords = movie_coords
+        self._movie_coords = movie_coords.coords
 
         # Define forward operator as a sequence (list) of matrix operations
         A = []
@@ -183,6 +180,21 @@ class ObserveOp(_LinearOperator):
         for ui, vi in zip(u_list, v_list):
             A.append(_obsh.ftmatrix(psize, self._nx, self._ny, _np.vstack((ui, vi)).T))
         self._A = A
+
+        # Weights for adjoint interpolation
+        weights = _np.zeros((self._nt, len(t_list)))
+        for i, t in enumerate(t_list):
+            idx = _np.argmin(_np.abs(t - movie_coords['t'].data))
+            pm = int(_np.sign(t - movie_coords['t'].data[idx]))
+            point0 = movie_coords['t'].data[idx]
+            point1 = movie_coords['t'].data[idx + pm]
+            interval = _np.abs(point0 - point1)
+            if interval > 0:
+                weights[idx, i] = 1.0 - _np.abs(point0 - t) / interval
+                weights[idx + pm, i] = 1.0 - _np.abs(point1 - t) / interval
+            else:
+                weights[idx, i] = 1.0
+        self._weights = weights
 
         # Shape and datatype
         self.shape = (u.size, self._nt * self._ny * self._nx)
@@ -199,7 +211,8 @@ class ObserveOp(_LinearOperator):
 
     def _rmatvec(self, x):
         x_list = _np.split(x, self._uvsplit)
-        return _np.concatenate([_np.matmul(At.conj().T, xt) for At, xt in zip(self._A, x_list)])
+        eht_H = _np.stack([_np.matmul(At.conj().T, xt) for At, xt in zip(self._A, x_list)])
+        return _np.matmul(self._weights, eht_H).ravel()
 
 class Loss(object):
     """
