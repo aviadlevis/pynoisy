@@ -245,8 +245,6 @@ class HGRFSolver(object):
             if (source.sizes['t'] != self.nt):
                 raise AttributeError('Input source has different number of frames to solver: {} != {}.'.format(
                     source.sizes['t'], self.nt))
-            if not _np.allclose(source.t, self.t):
-                raise AttributeError('Input source temporal grid is different to solver temporal grid.')
 
         # Save parameters to file (loaded within HYPRE)
         self.to_netcdf(self._param_file.name)
@@ -305,7 +303,8 @@ class HGRFSolver(object):
             )
 
         dims = ['t', 'x', 'y']
-        coords = {'t': self.t, 'x': self.x, 'y': self.y}
+
+        coords = {'t': source.t, 'x': self.x, 'y': self.y}
         attrs = {
             'forcing_strength': self.forcing_strength,
             'tol': tol,
@@ -352,7 +351,8 @@ class HGRFSolver(object):
         """
         inverse_solver = HGRFSolver(self.advection, self.diffusion, self.nt, self.evolution_length, self.t_units,
                                     self.forcing_strength, self.seed, self.num_solvers, 'Inverse', self.executable)
-        output = inverse_solver.run(source=source, std_scaling=False) / inverse_solver.std_scaling_factor()
+        output = inverse_solver.run(source=source, std_scaling=False) / \
+                (self.forcing_strength * inverse_solver.std_scaling_factor())
         return output
 
     def std_scaling_factor(self, nrecur=1, threshold=1e-10):
@@ -459,7 +459,8 @@ class HGRFSolver(object):
 
     @property
     def t(self):
-        return _xr.DataArray(_np.linspace(0, self.evolution_length, self.nt), dims='t', attrs={'units': self.t_units})
+        return _xr.DataArray(_np.arange(0, self.evolution_length, self.evolution_length/self.nt),
+                             dims='t', attrs={'units': self.t_units})
 
     @property
     def nt(self):
