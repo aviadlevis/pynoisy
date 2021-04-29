@@ -14,6 +14,7 @@ from pathlib import Path as _Path
 import inspect as _inspect
 from dask.diagnostics import ProgressBar as _ProgressBar
 from functools import wraps as _wraps
+import subprocess as _subprocess
 
 def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True), units='unitless'):
     """
@@ -307,6 +308,27 @@ def mode_map(output_type, data_vars=None, out_dims=None, chunk=1, progress_bar=T
         return wrapper
 
     return decorator
+
+def github_version():
+    """
+    Get github version.
+
+    Returns
+    -------
+    github_version: str,
+        The current GitHub version.
+
+    Raises
+    ------
+    warning if there are uncomitted changes in pynoisy or inoisy.
+    """
+    dirs = ['pynoisy', 'inoisy']
+    github_dirs = [_Path(_os.environ['INOISY_DIR']).parent.joinpath(dir) for dir in dirs]
+    uncomitted_changes = _subprocess.check_output(["git", "diff", "--name-only", *github_dirs]).strip().decode('UTF-8')
+    if uncomitted_changes:
+        _warnings.warn('There are uncomitted changes in the pynoisy/inoisy directories: {}'.format(uncomitted_changes))
+    github_version = _subprocess.check_output(["git", "describe"]).strip().decode('UTF-8')
+    return github_version
 
 @_xr.register_dataarray_accessor("utils_fourier")
 class _FourierAccessor(object):

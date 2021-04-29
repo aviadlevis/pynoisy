@@ -303,7 +303,7 @@ def lsqr_projection(b, A, damp=0.0, return_projection=False, return_coefs=False,
 
     if (real_estimation) and b.dtype == 'complex':
         r2, coefs = lsqr_real(b, A, damp)
-        projection[y_mask[:meas_length]] = _np.dot(A[:size_diff], coefs)
+        projection[y_mask[:meas_length]] = _np.matmul(A[:size_diff], coefs)
         projection = projection.reshape(*b.shape)
         r1 = _np.linalg.norm(b - projection) ** 2
     else:
@@ -312,7 +312,7 @@ def lsqr_projection(b, A, damp=0.0, return_projection=False, return_coefs=False,
 
     output = (r1, r2)
     if return_projection:
-        projection[y_mask[:meas_length]] = _np.dot(A[:size_diff], coefs)
+        projection[y_mask[:meas_length]] = _np.matmul(A[:size_diff], coefs)
         projection = projection.reshape(*b.shape)
         if isinstance(b, _xr.DataArray):
             projection = _xr.DataArray(projection, coords=b.coords)
