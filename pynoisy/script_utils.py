@@ -106,8 +106,12 @@ def get_default_solver(config, variable_params={}):
     nt, ny, nx = config['grid']['nt'], config['grid']['ny'], config['grid']['nx']
     diffusion_model = getattr(pynoisy.diffusion, config['diffusion']['model'])
     advection_model = getattr(pynoisy.advection, config['advection']['model'])
-    advection = advection_model(ny, nx, **config['advection']['fixed_params'], **variable_params.get('advection', {}))
-    diffusion = diffusion_model(ny, nx, **config['diffusion']['fixed_params'], **variable_params.get('diffusion', {}))
-    solver = pynoisy.forward.HGRFSolver(advection, diffusion, nt, config['grid']['evolution_length'])
+    solver_model =  getattr(pynoisy.forward, config['solver']['model'])
+    advection = advection_model(ny, nx, **config['advection'].get('fixed_params', {}),
+                                **variable_params.get('advection', {}))
+    diffusion = diffusion_model(ny, nx, **config['diffusion'].get('fixed_params', {}),
+                                **variable_params.get('diffusion', {}))
+    solver = solver_model(advection, diffusion, nt, **config['solver'].get('fixed_params', {}),
+                          **variable_params.get('solver', {}))
     return solver
 

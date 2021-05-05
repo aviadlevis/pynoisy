@@ -12,12 +12,12 @@ References
       for constructing approximate matrix decompositions. SIAM review, 53(2), pp.217-288. 2011.
       url: https://epubs.siam.org/doi/abs/10.1137/090771806
 """
-
-import numpy as np
 import xarray as xr
 import pynoisy
+import pynoisy.script_utils as script_utils
 from tqdm import tqdm
-import argparse, time, os, itertools, yaml
+import argparse, time, os
+import shutil, ruamel_yaml
 from pathlib import Path
 
 def parse_arguments():
@@ -65,78 +65,59 @@ def parse_arguments():
     args = parser.parse_args()
     return args
 
-args = parse_arguments()
+if __name__ == '__main__':
+    args = parse_arguments()
+    with open(args.config, 'r') as stream:
+        config = ruamel_yaml.load(stream, Loader=ruamel_yaml.Loader)
 
-with open(args.config, 'r') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
+    # Datetime and github version information
+    datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
+    github_version = pynoisy.utils.github_version()
 
-# Setup output path and directory
-datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
-dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'modes')
-Path(dirpath).mkdir(parents=True, exist_ok=True)
+    # Setup output path and directory
+    dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'modes')
+    Path(dirpath).mkdir(parents=True, exist_ok=True)
 
-# Dataset attributes (xarray doesnt save boolean attributes)
-attrs = vars(args)
-for key in attrs.keys():
-    attrs[key] = str(attrs[key]) if isinstance(attrs[key], bool) else attrs[key]
-attrs['date'] = datetime
+    # Setup NetCDF attributes
+    attrs = script_utils.netcdf_attrs(vars(args))
 
-# Generate parameter grid according to configuration file
-param_grid = []
-num_parameters = 0
-variable_params = dict()
-for field_type, params in config.items():
-    if 'variable_params' in params:
-        for param, grid_spec in config[field_type]['variable_params'].items():
-            grid = np.linspace(*grid_spec['range'], grid_spec['num'])
-            param_grid.append(list(zip([field_type]*grid_spec['num'], [param]*grid_spec['num'], grid)))
-            variable_params[field_type] = dict()
-            num_parameters += 1
-if num_parameters > 2:
-    raise AttributeError('More than 2 parameters dataset is not supported')
+    # Generate parameter grid according to configuration file
+    param_grid = script_utils.get_parameter_grid(config)
 
-param_grid = list(itertools.product(*param_grid))
+    # Generate solver object with the fixed parameters
+    solver = script_utils.get_default_solver(config)
 
-# Generate solver object with the fixed parameters
-diffusion_model = getattr(pynoisy.diffusion, config['diffusion']['model'])
-advection_model = getattr(pynoisy.advection, config['advection']['model'])
-advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'])
-diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'])
-solver = pynoisy.forward.HGRFSolver(advection, diffusion, config['grid']['nt'], config['grid']['evolution_length'],
-                                    num_solvers=args.num_solvers)
+    # Generate solver object with the fixed parameters
+    solver = script_utils.get_default_solver(config, variable_params={'solver': {'num_solvers': args.num_solvers}})
 
-# Main iteration loop: compute modes and save to dataset
-for i, param in enumerate(tqdm(param_grid, desc='parameter')):
-    # Arrange according to diffusion and advection parameters
-    for p in param:
-        variable_params[p[0]][p[1]] = p[2]
+    # Main iteration loop
+    for i, params in enumerate(tqdm(param_grid, desc='parameter')):
 
-    # Generate a solver object and compute modes
-    advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'], **variable_params['advection'])
-    diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
-    solver.update_advection(advection)
-    solver.update_diffusion(diffusion)
-    modes, residuals = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
-                                               n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs, verbose=False)
+        # Update solver object according to the variable parameters
+        solver = script_utils.get_default_solver(config, params)
+        modes, residuals = pynoisy.linalg.randomized_subspace(solver, args.blocksize, args.maxiter, tol=args.tol,
+                                                              n_jobs=args.n_jobs, num_test_grfs=args.num_test_grfs,
+                                                              verbose=False)
 
-    # Expand modes dimensions to include the dataset parameters
-    for field_type, params in variable_params.items():
-        for param, value in params.items():
-            modes = modes.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
-            if args.save_residuals:
-                residuals = residuals.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
+        # Expand modes dimensions to include the dataset parameters
+        modes = script_utils.expand_dataset_dims(modes, config, params)
+        residuals = script_utils.expand_dataset_dims(residuals, config, params)
 
-    # Save modes (and optionally residuals) to datasets
-    modes.attrs.update(attrs)
-    modes = modes.assign_coords({'file_index': i})
-    modes.to_netcdf(os.path.join(dirpath + 'mode{:04d}.nc'.format(i)))
+        # Save modes (and optionally residuals) to datasets
+        modes.attrs.update(attrs)
+        modes = modes.assign_coords({'file_index': i})
+        modes.to_netcdf(os.path.join(dirpath, 'mode{:04d}.nc'.format(i)))
+        if args.save_residuals:
+            residuals.to_netcdf(os.path.join(dirpath, 'residual{:04d}.nc'.format(i)))
+
+    # Consolidate residuals into a single file (and delete temporary residual files)
     if args.save_residuals:
-        residuals.to_netcdf(os.path.join(dirpath + 'residual{:04d}.nc'.format(i)))
+        with xr.open_mfdataset(os.path.join(dirpath, 'residual*.nc')) as dataset:
+            dataset.attrs.update(attrs)
+            dataset.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
+        for p in Path(dirpath).glob('residual*'):
+            p.unlink()
 
-# Consolidate residuals into a single file (and delete temporary residual files)
-if args.save_residuals:
-    residuals = xr.open_mfdataset(os.path.join(dirpath, 'residual*.nc'))
-    residuals.attrs.update(attrs)
-    residuals.to_netcdf(os.path.join(dirpath, 'residuals.nc'))
-    for p in Path(dirpath).glob('residual*'):
-        p.unlink()
+    # Copy script and config for reproducibility
+    shutil.copy(__file__, os.path.join(dirpath, 'script.py'.format(datetime)))
+    shutil.copy(args.config, os.path.join(dirpath, 'config.yaml'.format(datetime)))

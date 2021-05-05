@@ -11,10 +11,11 @@ References
    The Astrophysical Journal, 906(1), p.39. url: https://iopscience.iop.org/article/10.3847/1538-4357/abc8f3/meta
 .. [2] inoisy code: https://github.com/AFD-Illinois/inoisy
 """
-import numpy as np
 import pynoisy
+import pynoisy.script_utils as script_utils
 from tqdm import tqdm
-import argparse, time, os, itertools, yaml
+import argparse, time, os
+import shutil, ruamel_yaml
 from pathlib import Path
 
 def parse_arguments():
@@ -43,66 +44,45 @@ def parse_arguments():
     args = parser.parse_args()
     return args
 
-args = parse_arguments()
+if __name__ == '__main__':
+    args = parse_arguments()
+    with open(args.config, 'r') as stream:
+        config = ruamel_yaml.load(stream, Loader=ruamel_yaml.Loader)
 
-with open(args.config, 'r') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
+    # Datetime and github version information
+    datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
+    github_version = pynoisy.utils.github_version()
 
-# Setup output path and directory
-datetime = time.strftime("%d-%b-%Y-%H:%M:%S")
-dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'grfs')
-Path(dirpath).mkdir(parents=True, exist_ok=True)
+    # Setup output path and directory
+    dirpath = os.path.join(config['dataset']['outpath'].replace('<datetime>', datetime), 'grfs')
+    Path(dirpath).mkdir(parents=True, exist_ok=True)
 
-# Dataset attributes (xarray doesnt save boolean attributes)
-attrs = vars(args)
-for key in attrs.keys():
-    attrs[key] = str(attrs[key]) if isinstance(attrs[key], bool) else attrs[key]
-attrs['date'] = datetime
+    # Setup NetCDF attributes
+    attrs = script_utils.netcdf_attrs(vars(args))
 
-# Generate parameter grid according to configuration file
-param_grid = []
-num_parameters = 0
-variable_params = dict()
-for field_type, params in config.items():
-    if 'variable_params' in params:
-        for param, grid_spec in config[field_type]['variable_params'].items():
-            grid = np.linspace(*grid_spec['range'], grid_spec['num'])
-            param_grid.append(list(zip([field_type]*grid_spec['num'], [param]*grid_spec['num'], grid)))
-            variable_params[field_type] = dict()
-            num_parameters += 1
-if num_parameters > 2:
-    raise AttributeError('More than 2 parameters dataset is not supported')
+    # Generate parameter grid according to configuration file
+    param_grid = script_utils.get_parameter_grid(config)
 
-param_grid = list(itertools.product(*param_grid))
+    # Generate solver object with the fixed parameters
+    solver = script_utils.get_default_solver(config, variable_params={'solver': {'num_solvers': args.num_solvers}})
 
-# Generate solver object with the fixed parameters
-diffusion_model = getattr(pynoisy.diffusion, config['diffusion']['model'])
-advection_model = getattr(pynoisy.advection, config['advection']['model'])
-advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'])
-diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'])
-solver = pynoisy.forward.HGRFSolver(advection, diffusion, config['grid']['nt'], config['grid']['evolution_length'],
-                                    num_solvers=args.num_solvers)
+    # Main iteration loop
+    for i, params in enumerate(tqdm(param_grid, desc='parameter')):
 
-# Main iteration loop: compute modes and save to dataset
-for i, param in enumerate(tqdm(param_grid, desc='parameter')):
-    # Arrange according to diffusion and advection parameters
-    for p in param:
-        variable_params[p[0]][p[1]] = p[2]
+        # Update solver object according to the variable parameters
+        solver = script_utils.get_default_solver(config, params)
 
-    # Generate a solver object and compute modes
-    advection = advection_model(config['grid']['ny'], config['grid']['nx'], **config['advection']['fixed_params'], **variable_params['advection'])
-    diffusion = diffusion_model(config['grid']['ny'], config['grid']['nx'], **config['diffusion']['fixed_params'], **variable_params['diffusion'])
-    solver.update_advection(advection)
-    solver.update_diffusion(diffusion)
-    grfs = solver.run(num_samples=args.num, n_jobs=args.n_jobs, verbose=0)
-    grfs.name = 'grfs'
+        grfs = solver.run(num_samples=args.num, n_jobs=args.n_jobs, verbose=0)
+        grfs.name = 'grfs'
 
-    # Expand modes dimensions to include the dataset parameters
-    for field_type, params in variable_params.items():
-        for param, value in params.items():
-            grfs = grfs.expand_dims({config[field_type]['variable_params'][param]['dim_name']: [value]})
+        # Expand modes dimensions to include the dataset parameters
+        grfs = script_utils.expand_dataset_dims(grfs, config, params)
 
-    # Save to datasets
-    grfs.attrs.update(attrs)
-    grfs = grfs.assign_coords({'file_index': i})
-    grfs.to_netcdf(os.path.join(dirpath + 'grf{:04d}.nc'.format(i)))
+        # Save to datasets
+        grfs.attrs.update(attrs)
+        grfs = grfs.assign_coords({'file_index': i})
+        grfs.to_netcdf(os.path.join(dirpath, 'grf{:04d}.nc'.format(i)))
+
+    # Copy script and config for reproducibility
+    shutil.copy(__file__, os.path.join(dirpath, 'script.py'.format(datetime)))
+    shutil.copy(args.config, os.path.join(dirpath, 'config.yaml'.format(datetime)))
