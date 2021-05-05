@@ -279,7 +279,7 @@ class L2LossOp(LossOperator):
     def __init__(self, measurements, forwardOp, sigmas=None, weight=1.0):
         super().__init__(weight=weight)
         self.measurements = _np.array(measurements).ravel()
-        self.sigmas = _np.ones_likes(self.measurements) if sigmas is None else sigmas
+        self.sigmas = _np.ones_like(self.measurements) if sigmas is None else sigmas
         self.forwardOp = forwardOp
 
     def __call__(self, x):
