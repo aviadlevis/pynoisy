@@ -153,7 +153,7 @@ class ObserveOp(_LinearOperator):
     """
     def __init__(self, obs, movie_coords, dtype=_np.complex128):
 
-        movie_coords = movie_coords.to_dataset().utils_image.to_radians()
+        movie_coords = movie_coords.to_dataset().utils_image.change_units()
         movie_coords['t'].utils_movie.check_time_units(obs.timetype)
 
         import ehtim.observing.obs_helpers as _obsh
@@ -185,15 +185,19 @@ class ObserveOp(_LinearOperator):
         weights = _np.zeros((self._nt, len(t_list)))
         for i, t in enumerate(t_list):
             idx = _np.argmin(_np.abs(t - movie_coords['t'].data))
-            pm = int(_np.sign(t - movie_coords['t'].data[idx]))
             point0 = movie_coords['t'].data[idx]
-            point1 = movie_coords['t'].data[idx + pm]
-            interval = _np.abs(point0 - point1)
-            if interval > 0:
+            if _np.allclose(t, point0):
+                weights[idx, i] = 1.0
+            else:
+                pm = int(_np.sign(t - point0))
+                if ((idx + pm >= movie_coords['t'].size) or (idx + pm < 0)):
+                    raise AttributeError('Observation time is out of bounds for movie duration')
+                point1 = movie_coords['t'].data[idx + pm]
+                interval = _np.abs(point0 - point1)
+                assert (interval > 0), 'Interval should be g.t. 0'
                 weights[idx, i] = 1.0 - _np.abs(point0 - t) / interval
                 weights[idx + pm, i] = 1.0 - _np.abs(point1 - t) / interval
-            else:
-                weights[idx, i] = 1.0
+
         self._weights = weights
 
         # Shape and datatype
@@ -202,11 +206,11 @@ class ObserveOp(_LinearOperator):
 
     def _matvec(self, x):
         x = x.reshape(self._nt, self._nx, self._ny) if x.ndim != 3 else x
-        x = _xr.DataArray(x, coords=self._movie_coords, dims=['t', 'y', 'x']).interp(
-            t=self._obstimes, assume_sorted=True)
-        output = _np.concatenate([
-            _np.matmul(At, xt.data.ravel()) for At, xt in zip(self._A, x)
-        ])
+        if (not len(self._movie_coords['t']) == len(self._obstimes)) or not \
+                _np.allclose(self._movie_coords['t'], self._obstimes):
+            x = _xr.DataArray(x, coords=self._movie_coords, dims=['t', 'y', 'x']).interp(
+                t=self._obstimes, assume_sorted=True).values
+        output = _np.concatenate([_np.matmul(At, xt.ravel()) for At, xt in zip(self._A, x)])
         return output
 
     def _rmatvec(self, x):
