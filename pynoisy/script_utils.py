@@ -59,11 +59,15 @@ def get_parameter_grid(config):
     for field_type, params in config.items():
         if 'variable_params' in params:
             for param, grid_spec in config[field_type]['variable_params'].items():
-                grid = _np.linspace(*grid_spec['range'], grid_spec['num'])
+                if ('range' in grid_spec.keys()) and ('num' in grid_spec.keys()):
+                    # Linearly spaced grid defined by `range` and `num`
+                    grid = _np.linspace(*grid_spec['range'], grid_spec['num'])
+                elif 'values' in grid_spec:
+                    grid = grid_spec['values']
+                else:
+                    raise AttributeError
                 param_grid.append([{field_type: {param: value}} for value in grid])
                 num_parameters += 1
-    if num_parameters > 2:
-        raise AttributeError('More than 2 parameters dataset is not supported')
 
     param_grid = [_functools.reduce(lambda x, y: {**x, **y}, element) for element in \
                   _itertools.product(*param_grid)]
@@ -114,4 +118,30 @@ def get_default_solver(config, variable_params={}):
     solver = solver_model(advection, diffusion, nt, **config['solver'].get('fixed_params', {}),
                           **variable_params.get('solver', {}))
     return solver
+
+def get_regularization_ops(reg_params):
+    """
+    Generate regularization Operators for the regularization param dictionary.
+
+    Parameters
+    ----------
+    reg_params: dict,
+        Dictionary loaded from yaml file.
+
+    Returns
+    -------
+    reg_ops: list,
+        list of regularization operators.
+    """
+    reg_ops = []
+    for reg_op, reg_value in reg_params.items():
+        if reg_op == 'MEMRegOp':
+            model = reg_value['prior_image']['model']
+            prior_model = getattr(pynoisy.envelope, model)
+            prior_image = prior_model(**reg_value['prior_image']['fixed_params'])
+            reg_ops.append(pynoisy.operators.MEMRegOp(prior=prior_image, weight=reg_value['weight']))
+        else:
+            reg_model = getattr(pynoisy.operators, reg_op)
+            reg_ops.append(reg_model(**reg_value))
+    return reg_ops
 
