@@ -23,12 +23,12 @@ def linspace_2d(num, start=(-0.5, -0.5), stop=(0.5, 0.5), endpoint=(True, True),
     Parameters
     ----------
     num: int or tuple
-        Number of grid points. If num is a scalar the 2D coordinates are assumed to
+        Number of grid points in (y, x) dimensions. If num is a scalar the 2D coordinates are assumed to
         have the same number of points.
     start: (float, float)
-        (x, y) starting grid point (included in the grid)
+        (y, x) starting grid point (included in the grid)
     stop: (float, float)
-        (x, y) ending grid point (optionally included in the grid)
+        (y, x) ending grid point (optionally included in the grid)
     endpoint: (bool, bool)
         Optionally include the stop points in the grid.
     units: str, default='unitless'
@@ -327,7 +327,8 @@ def github_version():
     uncomitted_changes = _subprocess.check_output(["git", "diff", "--name-only", *github_dirs]).strip().decode('UTF-8')
     if uncomitted_changes:
         _warnings.warn('There are uncomitted changes in the pynoisy/inoisy directories: {}'.format(uncomitted_changes))
-    github_version = _subprocess.check_output(["git", "describe"]).strip().decode('UTF-8')
+    github_version = _subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode('UTF-8')
+    github_version = github_version + ' + uncomitted changes' if uncomitted_changes else github_version
     return github_version
 
 @_xr.register_dataarray_accessor("utils_fourier")
@@ -570,16 +571,16 @@ class _ImageAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def to_radians(self, image_dims=['y', 'x']):
+    def change_units(self, units='rad', image_dims=['y', 'x']):
         """
         A utility for functions which require radian units along image dimensions.
 
         Parameters
         ----------
+        units: str, default='rad'
+            Units supported are 'rad', 'uas', 'as'.
         image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
-        coords: xr.Coordinates,
-            Input xr.Coordinates with
 
         Returns
         -------
@@ -590,14 +591,16 @@ class _ImageAccessor(object):
         ------
         Warning if units are not: 'rad', 'uas', 'as'.
         """
-        unit_conversion = {'as': 4.848136811094136e-06, 'uas': 4.848136811094136e-12}
+        unit_conversion = {
+            'rad': {'rad': 1.0, 'as': 4.848136811094136e-06, 'uas': 4.848136811094136e-12},
+            'as': {'rad': 206264.80624714843, 'as': 1.0, 'uas': 1e6},
+            'uas': {'rad': 206264806247.14844, 'as': 1e-6, 'uas': 1.0}
+        }
         output = self._obj.copy()
         for dim in image_dims:
-            dim_units = output[dim].units
-            if (dim_units == 'as') or (dim_units == 'uas'):
-                output[dim] = _xr.DataArray(output[dim] * unit_conversion[dim_units], attrs={'units': 'rad'})
-            elif (dim_units == 'rad'):
-                continue
+            input_units = output[dim].units
+            if (input_units == 'rad') or (input_units == 'as') or (input_units == 'uas') :
+                output[dim] = _xr.DataArray(output[dim] * unit_conversion[units][input_units], attrs={'units': units})
             else:
                 _warnings.warn('Units not recognized (should be rad/as/uas). Assuming rad units')
         return output

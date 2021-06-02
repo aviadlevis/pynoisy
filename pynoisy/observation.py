@@ -15,7 +15,8 @@ import ehtim as _eh
 import ehtim.const_def as _ehc
 import pynoisy.utils as _utils
 
-def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5)):
+def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=True, xlim=(-9.5, 9.5), ylim=(-9.5, 9.5),
+                     shift_inital_time=True):
     """
     Plot the uv coverage as a function of observation time.
     x axis: East-West frequency
@@ -35,31 +36,41 @@ def plot_uv_coverage(obs, ax=None, fontsize=14, cmap='rainbow', add_conjugate=Tr
         Plot the conjugate points on the uv plane.
     xlim, ylim: (xmin/ymin, xmax/ymax), default=(-9.5, 9.5)
         x-axis range in [Giga lambda] units
-
-    Notes
-    -----
-
+    shift_inital_time: bool,
+        If True, observation time starts at t=0.0
     """
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
     giga = 10**9
-    u = _np.concatenate([obsdata['u'] for obsdata in obs.tlist()])
-    v = _np.concatenate([obsdata['v'] for obsdata in obs.tlist()])
+    u = _np.concatenate([obsdata['u'] for obsdata in obs.tlist()]) / giga
+    v = _np.concatenate([obsdata['v'] for obsdata in obs.tlist()]) / giga
     t = _np.concatenate([obsdata['time'] for obsdata in obs.tlist()])
 
+    if shift_inital_time:
+        t -= t.min()
+
     if add_conjugate:
-        u = _np.concatenate([u, -u]) / giga
-        v = _np.concatenate([v, -v]) / giga
+        u = _np.concatenate([u, -u])
+        v = _np.concatenate([v, -v])
         t = _np.concatenate([t, t])
 
     if ax is None:
         fig, ax = _plt.subplots(1, 1)
+    else:
+        fig = ax.get_figure()
 
-    ax.scatter(u, v, c=t, cmap=_plt.cm.get_cmap(cmap))
+    sc = ax.scatter(u, v, c=t, cmap=_plt.cm.get_cmap(cmap))
     ax.set_xlabel(r'East-West Freq $[G \lambda]$', fontsize=fontsize)
     ax.set_ylabel(r'North-South Freq $[G \lambda]$', fontsize=fontsize)
     ax.invert_xaxis()
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     ax.set_aspect('equal')
+
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes('right', size='3.5%', pad=0.2)
+    cbar = fig.colorbar(sc, cax=cax, ticks=[0, 4, 8, 12])
+    cbar.set_ticklabels(['{} Hrs'.format(tick) for tick in cbar.get_ticks()])
     _plt.tight_layout()
 
 def obs_to_xarray(obs):
@@ -124,9 +135,10 @@ def observe_same(movie, obs, ttype='nfft', output_path='./caltable', thermal_noi
 
     # these gains are approximated from the EHT 2017 data
     # the standard deviation of the absolute gain of each telescope from a gain of 1
-    GAIN_OFFSET = {'AA': 0.15, 'AP': 0.15, 'AZ': 0.15, 'LM': 0.6, 'PV': 0.15, 'SM': 0.15, 'JC': 0.15, 'SP': 0.15,
-                   'SR': 0.0}
-    GAINP = {'AA': 0.05, 'AP': 0.05, 'AZ': 0.05, 'LM': 0.5, 'PV': 0.05, 'SM': 0.05, 'JC': 0.05, 'SP': 0.15, 'SR': 0.0}
+    GAIN_OFFSET = {'ALMA': 0.15, 'APEX': 0.15, 'SMT': 0.15, 'LMT': 0.6, 'PV': 0.15, 'SMA': 0.15, 'JCMT': 0.15,
+                   'SPT': 0.15, 'SR': 0.0}
+    GAINP = {'ALMA': 0.05, 'APEX': 0.05, 'SMT': 0.05, 'LMT': 0.5, 'PV': 0.05, 'SMA': 0.05, 'JCMT': 0.05,
+             'SPT': 0.15, 'SR': 0.0}
 
     stabilize_scan_phase = True  # If true then add a single phase error for each scan to act similar to adhoc phasing
     stabilize_scan_amp = True    # If true then add a single gain error at each scan
@@ -202,6 +214,38 @@ def empty_eht_obs(array, nt, tint, tstart=4.0, tstop=15.5,
                         timetype=timetype, polrep=polrep)
     return obs
 
+def ehtim_to_xarray(ehtim_obj):
+    """
+    Transform ehtim movie or image to xarray.DataArray.
+
+    Parameters
+    ----------
+    ehtim_obj: ehtim.image.Image or ehtim.movie.Movie object
+        An Image or Movie object depending on the data dimensionality.
+
+    Returns
+    -------
+    output: xr.DataArray
+        A data array with the image or movie data and coordinates.
+
+    Raises
+    ------
+    Attribute error if ehtim_obj is not supported.
+    """
+    grid = _utils.linspace_2d((ehtim_obj.ydim, ehtim_obj.xdim)).utils_image.set_fov(
+        (ehtim_obj.fovx(), 'rad'))
+    if isinstance(ehtim_obj, _eh.image.Image):
+        data = ehtim_obj.imarr()
+    elif isinstance(ehtim_obj, _eh.movie.Movie):
+        data = ehtim_obj.iframes.reshape(ehtim_obj.nframes, ehtim_obj.xdim, ehtim_obj.ydim)
+        grid.coords.update({'t': _xr.DataArray(ehtim_obj.times, dims='t', attrs={'units': 'UTC'})})
+    else:
+        raise AttributeError('Unsupported ehtim_obj: {}'.format(ehtim_obj.__class__))
+
+    output = _xr.DataArray(data, dims=grid.dims, coords=grid.coords,
+                           attrs={'ra': ehtim_obj.ra, 'dec': ehtim_obj.dec, 'rf': ehtim_obj.rf, 'mjd': ehtim_obj.mjd})
+    return output
+
 @_xr.register_dataarray_accessor("utils_observe")
 class _ObserveAccessor(object):
     """
@@ -211,15 +255,62 @@ class _ObserveAccessor(object):
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def block_fourier(self, fft_pad_factor=2, image_dims=['y', 'x'], fft_dims=['u', 'v']):
-        """
-         Fast Fourier transform of one or several movies.
-         Fourier is done per each time slice on image dimensions.
-         This function adds a 2D triangle pulse and phase to match centroid convention.
+    def eht_fillna(self, obs, fft_pad_factor=1, image_dims=['y', 'x'], fft_dims=['u', 'v'], add_conjugate=True):
+        """Nearest neighbor sampling of EHT array measurements.
+        The rest of the uv points are filled with np.nan values.
 
         Parameters
         ----------
-        fft_pad_factor: float
+        obs: Obsdata,
+            ehtim observation data containing the array geometry and measurement times.
+        fft_pad_factor: float, default=1
+            Padding factor for increased fft resolution.
+        image_dims: [dim1, dim2], default=['y', 'x'],
+            Image data dimensions.
+        fft_dims: [dim1, dim2], default=['u', 'v']
+            Fourier data dimensions.
+        add_conjugate: bool, default=True,
+            Add conjugate points on the uv plane.
+
+        Returns
+        -------
+        output: xr.DataArray,
+            A movie sampled with nearest neighbor interpolation on the uv point specified by obs.
+            The rest of the uv-plane is filled with np.nan values.
+        """
+        fourier = self._obj.utils_observe.block_fourier(fft_pad_factor=fft_pad_factor, image_dims=image_dims,
+                                                        fft_dims=fft_dims)
+
+        u = _np.concatenate([obsdata['u'] for obsdata in obs.tlist()])
+        v = _np.concatenate([obsdata['v'] for obsdata in obs.tlist()])
+        t = _np.concatenate([obsdata['time'] for obsdata in obs.tlist()])
+
+        # For static images duplicate temporal dimension
+        if 't' not in fourier.coords:
+            fourier = fourier.expand_dims(t=t)
+
+        if add_conjugate:
+            u = _np.concatenate([u, -u])
+            v = _np.concatenate([v, -v])
+            t = _np.concatenate([t, t])
+
+        data = fourier.sel(t=_xr.DataArray(t, dims='index'), u=_xr.DataArray(v, dims='index'),
+                           v=_xr.DataArray(u, dims='index'), method='nearest')
+
+        output = _xr.full_like(fourier, fill_value=_np.nan)
+        output.attrs.update(fourier.attrs)
+        output.attrs.update(source=obs.source)
+        output.loc[{'t': data.t, 'u': data.u, 'v': data.v}] = data
+        return output
+
+    def block_fourier(self, fft_pad_factor=2, image_dims=['y', 'x'], fft_dims=['u', 'v']):
+        """Fast Fourier transform of one or several movies.
+        Fourier is done per each time slice on image dimensions.
+        This function adds a 2D triangle pulse and phase to match centroid convention.
+
+        Parameters
+        ----------
+        fft_pad_factor: float, default=2
             Padding factor for increased fft resolution.
         image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
@@ -236,7 +327,7 @@ class _ObserveAccessor(object):
         Units of input data image_dims must be 'rad', 'as' or uas'.
         For high order downstream interpolation (e.g. cubic) of uv points a higher fft_pad_factor should be taken.
         """
-        movies = self._obj.squeeze().utils_image.to_radians(image_dims)
+        movies = self._obj.squeeze().utils_image.change_units(image_dims=image_dims)
 
         psize = movies.utils_image.psize
         image_dim_sizes = (movies[image_dims[0]].size, movies[image_dims[1]].size)
@@ -256,7 +347,7 @@ class _ObserveAccessor(object):
         ----------
         obs: Obsdata,
             ehtim observation data containing the array geometry and measurement times.
-        fft_pad_factor: float
+        fft_pad_factor: float default=2
             Padding factor for increased fft resolution.
         image_dims: [dim1, dim2], default=['y', 'x'],
             Image data dimensions.
@@ -281,7 +372,7 @@ class _ObserveAccessor(object):
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/movie.py#L981
         https://github.com/achael/eht-imaging/blob/6b87cdc65bdefa4d9c4530ea6b69df9adc531c0c/ehtim/observing/obs_simulate.py#L182
         """
-        movies = self._obj.utils_image.to_radians(image_dims)
+        movies = self._obj.utils_image.change_units(image_dims=image_dims)
         movies.utils_movie.check_time_units(obs.timetype)
 
         fft_dims = ['u', 'v']
@@ -402,7 +493,7 @@ class _ObserveAccessor(object):
         output: ehtim.Movie or ehtim.Image objects
             A Movie or Image object depending on the data dimensionality
         """
-        movie = self._obj.squeeze().utils_image.to_radians(image_dims)
+        movie = self._obj.squeeze().utils_image.change_units(image_dims=image_dims)
         movie.utils_movie.check_time_units('UTC')
 
         if movie.ndim > 3:
@@ -422,3 +513,4 @@ class _ObserveAccessor(object):
                                           source=source)
             output.ivec = movie.data.ravel()
         return output
+
