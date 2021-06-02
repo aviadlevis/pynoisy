@@ -1,13 +1,11 @@
-# Configuration file for mode computation
+# Configuration file for GRF loss computation
 diffusion:
   model: 'general_xy'               # Model name (in pynoisy/diffusion.py)
-  # Fixed parameters (see pynoisy.diffusion.general_xy parameters for detail)
   fixed_params:
     tau: 1.0
     lam: 5.0
     tensor_ratio: 0.1
     r_cutoff: 0.5
-  # Variable parameters (see pynoisy.diffusion.general_xy parameters for detail).
   variable_params:
     opening_angle:
       dim_name: 'true_spatial_angle'  # Dimension name for the xr.Dataset
@@ -16,23 +14,23 @@ diffusion:
 
 advection:
   model: 'general_xy'                 # Model name (in pynoisy/advection.py).
-  # Fixed parameters (see pynoisy.advection.general_xy parameters for detail).
   fixed_params:
     r_cutoff: 0.5
-  # Variable parameters (see pynoisy.advection.general_xy parameters for detail).
   variable_params:
     opening_angle:
       dim_name: 'true_temporal_angle' # Dimension name for the xr.Dataset
       num: 4                          # Number of grid points.
       range: [-1.7, 3.1]              # Parameter range.
 
+solver:
+  model: 'HGRFSolver'                 # Model name (pynoisy/forward.py).
+  fixed_params:
+    evolution_length: 100.0           # Evolution time in terms of M.
+
 grid:
   nx: 64                              # Number of x grid points.
   ny: 64                              # Number of y grid points.
   nt: 64                              # Number of temporal frames
-  grid_start: [-10.0, -10.0]          # Grid start point (including) for (y, x).
-  grid_end: [10.0, 10.0]              # Grid end point (including) for (y, x).
-  evolution_length: 100.0             # Evolution time in terms of M.
 
 modes:
   directory: 'datasets/opening_angles.09-Apr-2021-18:48:05/modes/'

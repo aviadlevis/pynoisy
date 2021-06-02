@@ -37,10 +37,10 @@ movie:
 
 loss:
   method: 'compute_visibilities_loss'
-  damp: 1e-2                          # Dampning factor for least squares.
+  damp: 3e-2                          # Dampning factor for least squares.
 
 array:
-  path: 'eht_arrays/ngEHT.txt'
+  path: 'eht_arrays/EHT2025.txt'
 
 observation:
   nt: 350                             # Number of observation times
@@ -54,13 +54,13 @@ noise:
 
 envelope_estimation:
   method: 'L-BFGS-B'
-  maxiter: 60.0
+  maxiter: 200.0
   regularization:
     FluxRegOp:
       weight: 1.0
-      prior: 10.0                     # Total flux prior
+      prior: 1.0                      # Total flux prior
     MEMRegOp:
-      weight: 20.0
+      weight: 50.0
       prior_image:
         model: 'gaussian'
         fixed_params:
@@ -79,7 +79,7 @@ modes:
   directory: 'datasets/opening_angles.09-Apr-2021-18:48:05/modes/'
 
 output:
-  path: 'benchmarks/ngEHT/nonoise/'
+  path: 'benchmarks/eht2025/nonoise/'
 
 
 
