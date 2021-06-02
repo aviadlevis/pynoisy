@@ -1,0 +1,86 @@
+# Configuration file for EHT loss computation
+diffusion:
+  model: 'general_xy'               # Model name (in pynoisy/diffusion.py)
+  fixed_params:
+    tau: 1.0
+    lam: 5.0
+    tensor_ratio: 0.1
+    r_cutoff: 0.5
+  variable_params:
+    opening_angle:
+      dim_name: 'true_spatial_angle'  # Dimension name for the xr.Dataset
+      num: 4                          # Number of grid points.
+      range: [-1.5, 1.2]              # Parameter range.
+
+advection:
+  model: 'general_xy'                 # Model name (in pynoisy/advection.py).
+  fixed_params:
+    r_cutoff: 0.5
+  variable_params:
+    opening_angle:
+      dim_name: 'true_temporal_angle' # Dimension name for the xr.Dataset
+      num: 4                          # Number of grid points.
+      range: [-1.7, 3.1]              # Parameter range.
+
+solver:
+  model: 'HGRFSolver'                 # Model name (pynoisy/forward.py).
+  fixed_params:
+    evolution_length: 100.0           # Evolution time in terms of M.
+
+envelope:
+  model: 'ring'
+  total_flux: 1.0                     # Total flux
+
+movie:
+  alpha: 2.0                          # Exponential modulation rate parameter.
+  fov: [160.0, 'uas']                 # Field of view in
+
+loss:
+  method: 'compute_visibilities_loss'
+  damp: 3e-2                          # Dampning factor for least squares.
+
+array:
+  path: 'eht_arrays/EHT2025.txt'
+
+observation:
+  nt: 350                             # Number of observation times
+  tint: 60.0                          # Integration time in seconds
+  tstart: 4.0                         # Observation start in UTC hours
+  tstop: 15.0                         # Observation stop in UTC hours
+
+noise:
+  thermal: False                      # Add thermal noise
+  fractional: 0.0                     # Systematic noise
+
+envelope_estimation:
+  method: 'L-BFGS-B'
+  maxiter: 200.0
+  regularization:
+    FluxRegOp:
+      weight: 1.0
+      prior: 1.0                      # Total flux prior
+    MEMRegOp:
+      weight: 50.0
+      prior_image:
+        model: 'gaussian'
+        fixed_params:
+          nx: 64
+          ny: 64
+          fwhm: 80                    # Full width half max of prior Gaussian
+          fov: [160.0, 'uas']         # Field of view in
+          total_flux: 1.0             # Total flux
+
+grid:
+  nx: 64                              # Number of x grid points.
+  ny: 64                              # Number of y grid points.
+  nt: 64                              # Number of temporal frames
+
+modes:
+  directory: 'datasets/opening_angles.09-Apr-2021-18:48:05/modes/'
+
+output:
+  path: 'benchmarks/eht2025/nonoise/'
+
+
+
+

@@ -53,7 +53,15 @@ pip install .
 cd ../
 ``` 
 
-**Singularity Container**
+Getting Started
+----
+The easiest way to get started is through the jupyter notebooks in the `tutorials` directory.
+These notebooks cover both the generation (forward) and estimation (inverse) methods and procedures. Furthermore, 
+basic utility and visualization methods are introduced and used throughout.
+
+
+
+Singularity Container
 ----
 Login and enter API access token
 ```
