@@ -63,7 +63,7 @@ def slider_frame_comparison(frames1, frames2, scale='amp'):
     _interact(imshow_frame, frame=(0, num_frames-1));
 
 def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdBu_r', add_ticks=False,
-                   add_colorbars=True, titles=None, fps=10, output=None):
+                   add_colorbars=True, titles=None, fps=10, output=None, flipy=False):
     """
     Synchronous animation of multiple 3D xr.DataArray along a chosen dimension.
 
@@ -92,6 +92,8 @@ def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdB
         Frames per seconds.
     output: string,
         Path to save the animated gif. Should end with .gif.
+    flipy: bool, default=False,
+        Flip y-axis to match ehtim plotting function
 
     Returns
     -------
@@ -131,6 +133,8 @@ def animate_synced(movie_list, axes, t_dim='t', vmin=None, vmax=None, cmaps='RdB
             fig.colorbar(im, cax=cax)
         im.set_clim(vmin, vmax)
         images.append(im)
+        if flipy:
+            ax.invert_yaxis()
 
     _plt.tight_layout()
     anim = _animation.FuncAnimation(fig, animate_frame, frames=num_frames, interval=1e3 / fps)
@@ -213,7 +217,7 @@ class _VisualizationAccessor(object):
         """
         movie = self._obj.squeeze()
         if movie.ndim != 3:
-            raise AttributeError('Move dimensions ({}) different than 3'.format(movie.ndim))
+            raise AttributeError('Movie dimensions ({}) different than 3'.format(movie.ndim))
 
         num_frames = movie[t_dim].size
         image_dims = list(movie.dims)
@@ -240,7 +244,7 @@ class _VisualizationAccessor(object):
         _interact(imshow_frame, frame=(0, num_frames-1));
 
     def animate(self, t_dim='t', ax=None, vmin=None, vmax=None, cmap='RdBu_r', add_ticks=True, add_colorbar=True,
-                fps=10, output=None):
+                fps=10, output=None, flipy=False):
         """
         Animate a 3D xr.DataArray along a chosen dimension.
 
@@ -264,6 +268,8 @@ class _VisualizationAccessor(object):
             Frames per seconds.
         output: string,
             Path to save the animated gif. Should end with .gif.
+        flipy: bool, default=False,
+            Flip y-axis to match ehtim plotting function
 
         Returns
         -------
@@ -272,7 +278,7 @@ class _VisualizationAccessor(object):
         """
         movie = self._obj.squeeze()
         if movie.ndim != 3:
-            raise AttributeError('Move dimensions ({}) different than 3'.format(movie.ndim))
+            raise AttributeError('Movie dimensions ({}) different than 3'.format(movie.ndim))
 
         num_frames = movie[t_dim].size
         image_dims = list(movie.dims)
@@ -302,6 +308,8 @@ class _VisualizationAccessor(object):
         vmin = movie.min() if vmin is None else vmin
         vmax = movie.max() if vmax is None else vmax
         im.set_clim(vmin, vmax)
+        if flipy:
+            ax.invert_yaxis()
         anim = _animation.FuncAnimation(fig, animate_frame, frames=num_frames, interval=1e3 / fps)
 
         if output is not None:
@@ -327,6 +335,7 @@ class _VisualizationAccessor(object):
         ax: matplotlib axis,
             A matplotlib axis object for the visualization.
         figsize: (float, float),
+            Figure size: (horizontal_size, vertical_size)
             Figure size: (horizontal_size, vertical_size)
         downscale_factor: int, default=8
             Downscale the quiver image. Note that this could cause interpolation issues for high downscales or

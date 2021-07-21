@@ -237,7 +237,7 @@ def ehtim_to_xarray(ehtim_obj):
     if isinstance(ehtim_obj, _eh.image.Image):
         data = ehtim_obj.imarr()
     elif isinstance(ehtim_obj, _eh.movie.Movie):
-        data = ehtim_obj.iframes.reshape(ehtim_obj.nframes, ehtim_obj.xdim, ehtim_obj.ydim)
+        data = ehtim_obj.iframes.reshape(ehtim_obj.nframes, ehtim_obj.ydim, ehtim_obj.xdim)
         grid.coords.update({'t': _xr.DataArray(ehtim_obj.times, dims='t', attrs={'units': 'UTC'})})
     else:
         raise AttributeError('Unsupported ehtim_obj: {}'.format(ehtim_obj.__class__))

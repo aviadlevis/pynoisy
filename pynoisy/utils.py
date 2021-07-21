@@ -737,7 +737,7 @@ class _PolarAccessor(object):
         """
         if not(image_dims[0] in self._obj.coords and image_dims[1] in self._obj.coords):
             raise AttributeError('Coordinates have to contain both x and y')
-        x, y = self._obj[image_dims[0]], self._obj[image_dims[1]]
+        y, x = self._obj[image_dims[0]], self._obj[image_dims[1]]
         yy, xx = _np.meshgrid(y, x, indexing='ij')
         r = _np.sqrt(xx ** 2 + yy ** 2)
         theta = _np.arctan2(yy, xx)
