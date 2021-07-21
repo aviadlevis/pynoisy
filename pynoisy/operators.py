@@ -144,7 +144,7 @@ class ObserveOp(_LinearOperator):
 
     Parameters
     ----------
-    obs; ehtim.Observation,
+    obs: ehtim.Observation,
         ehtim Observation object.
     movie_coords: xr.Coordinates,
         The coordinates of the movie
