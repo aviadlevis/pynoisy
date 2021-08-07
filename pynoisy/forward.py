@@ -175,7 +175,7 @@ class HGRFSolver(object):
         )
         return source
 
-    def to_netcdf(self, path):
+    def to_netcdf(self, path, group='', mode='w'):
         """
         Save solver parameters (params, advection, diffusion) to netcdf.
         Parameters are saved to the same file with different groups.
@@ -184,14 +184,19 @@ class HGRFSolver(object):
         ----------
         path: str,
             Output file path.
+        group: str, default=''
+            Group to nest solver within
+        mode: ({"w", "a"}, default: "w"
+            Write (‘w’) or append (‘a’) mode. If mode=’w’, any existing file at this location will be overwritten.
+            If mode=’a’, existing variables will be overwritten.
 
         Notes
         -----
         For loading see class method from_netcdf.
         """
-        self.params.to_netcdf(path, mode='w')
-        self.advection.to_netcdf(path, group='advection', mode='a')
-        self.diffusion.to_netcdf(path, group='diffusion', mode='a')
+        self.params.to_netcdf(path, group=group + 'params', mode=mode)
+        self.advection.to_netcdf(path, group=group + 'advection', mode='a')
+        self.diffusion.to_netcdf(path, group=group + 'diffusion', mode='a')
 
     def run(self, source=None, maxiter=50, nrecur=1, verbose=2, num_samples=1, tol=1e-6,
             n_jobs=1, seed=None, timer=False, std_scaling=True, nprocx=1, nprocy=1, nproct=-1):
@@ -332,6 +337,7 @@ class HGRFSolver(object):
             output = output.squeeze('sample').drop_vars('sample')
 
         grf = output.transpose(...,'t','y','x')
+        grf.name = 'grf'
         return grf
 
     def run_inverse(self, source):
@@ -414,7 +420,7 @@ class HGRFSolver(object):
         return n_jobs, cmd
 
     @classmethod
-    def from_netcdf(cls, path):
+    def from_netcdf(cls, path, group=''):
         """
         Load solver from netcdf file.
 
@@ -422,6 +428,8 @@ class HGRFSolver(object):
         ----------
         path: str,
             Output file path.
+        group: str, default=''
+            Group to nest solver within
 
         Returns
         -------
@@ -432,9 +440,12 @@ class HGRFSolver(object):
         -----
         For saving see method to_netcdf.
         """
-        params = _xr.load_dataset(path)
-        return cls(advection=_xr.load_dataset(path, group='advection'),
-                   diffusion=_xr.load_dataset(path, group='diffusion'),
+        params = _xr.load_dataset(path, group=group + 'params')
+        return cls(advection=_xr.load_dataset(path, group=group + 'advection'),
+                   diffusion=_xr.load_dataset(path, group=group + 'diffusion'),
+                   nt=int(params.nt.data),
+                   evolution_length=float(params.evolution_length.data),
+                   t_units=str(params.t_units.data),
                    forcing_strength=float(params.forcing_strength.data),
                    seed=int(params.seed.data),
                    num_solvers=int(params.num_solvers),
@@ -532,4 +543,5 @@ def modulate(envelope, grf, alpha, keep_attrs=True):
         movie.attrs.update(grf.attrs)
         movie.attrs.update(envelope.attrs)
 
+    movie.name = 'movie'
     return movie
