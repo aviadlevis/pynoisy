@@ -153,7 +153,9 @@ class ObserveOp(_LinearOperator):
     """
     def __init__(self, obs, movie_coords, dtype=_np.complex128):
 
-        movie_coords = movie_coords.to_dataset().utils_image.change_units()
+        if isinstance(movie_coords, _xr.core.coordinates.DataArrayCoordinates):
+            movie_coords = movie_coords.to_dataset()
+        movie_coords = movie_coords.utils_image.change_units('rad')
         movie_coords['t'].utils_movie.check_time_units(obs.timetype)
 
         import ehtim.observing.obs_helpers as _obsh
