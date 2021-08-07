@@ -3,9 +3,86 @@ Utility functions and methods used across scripts
 """
 import numpy as _np
 import pynoisy
+import xarray as _xr
 import time as _time
 import functools as _functools
 import itertools as _itertools
+import os as _os
+
+def estimate_envelope_mem(obs, movie_coords, total_flux=1.0, fwhm=80.0, FluxReg_w=1e5, MEMReg_w=2e5,
+                          output_path=None):
+
+    from scipy.optimize import minimize
+
+    # Datafit Operators
+    ehtOp = pynoisy.operators.ObserveOp(obs, movie_coords)
+    modulateOp = pynoisy.operators.ModulateOp(_xr.DataArray(1.0, coords=movie_coords))
+    forwardOp = ehtOp * modulateOp
+    data_ops = pynoisy.operators.L2LossOp(obs.data['vis'], forwardOp, obs.data['sigma'])
+
+    # Regularization Operators
+    fov = movie_coords.to_dataset().utils_image.fov
+    ny, nx = movie_coords['y'].size, movie_coords['x'].size
+    prior_image = pynoisy.envelope.gaussian(ny, nx, fov=fov, fwhm=fwhm, total_flux=total_flux)
+    reg_ops = [
+        pynoisy.operators.FluxRegOp(prior=total_flux, weight=FluxReg_w),
+        pynoisy.operators.MEMRegOp(prior=prior_image, weight=MEMReg_w)
+    ]
+
+    # Define loss function, initial guess and bounds
+    lossOp = pynoisy.operators.Loss(data_ops=data_ops, reg_ops=reg_ops)
+    x0 = _np.zeros(ny * nx)
+    bounds = [(0, None) for _ in range(x0.size)]
+
+    # Use scipy minimize to estimate the envelope
+    output = minimize(lossOp, x0=x0, jac=lossOp.jac, method='L-BFGS-B', bounds=bounds,
+                      options={'maxiter': 1000, 'disp': True})
+
+    envelope = _xr.DataArray(output['x'].reshape(ny, nx), dims=['y', 'x'],
+                            coords={'y': movie_coords['y'], 'x': movie_coords['x']})
+    envelope.attrs.update(total_flux=total_flux, fwhm=fwhm, niter=output['nit'])
+    for op in reg_ops:
+        envelope.attrs.update({type(op).__name__: op.w})
+    envelope.name = 'envelope_estimate'
+
+    if output_path:
+        mode = 'a' if _os.path.exists(output_path) else 'w'
+        envelope.to_netcdf(output_path, mode=mode)
+    return envelope
+
+def observations_from_correlation_angles(temporal_angle, spatial_angle, eht_array, tint=60.0,
+                                         tstart=4.0, tstop=15.5,ntobs=64, nt=64, ny=64, nx=64,
+                                         envelope_model=pynoisy.envelope.ring, total_flux=1.0,
+                                         fov=(160.0, 'uas'), alpha=2.0, thermal_noise=True,
+                                         frac_noise=0.05, seed=None, output_path=None):
+
+    import ehtim as eh
+
+    # Generate a stochastic video by modulating an envelope with a Gaussian Random Field.
+    # Randomly sample the *true* underlying accretion parameters.
+    diffusion = pynoisy.diffusion.general_xy(ny=ny, nx=nx, opening_angle=spatial_angle)
+    advection = pynoisy.advection.general_xy(ny=ny, nx=nx, opening_angle=temporal_angle)
+    solver = pynoisy.forward.HGRFSolver(advection, diffusion, nt=nt, seed=seed)
+    grf = solver.run().utils_image.set_fov(fov).utils_movie.set_time(tstart=tstart, tstop=tstop, units='UTC')
+
+    # Generate source movie from envelope and GRF
+    envelope = envelope_model(ny=ny, nx=nx, total_flux=total_flux).utils_image.set_fov(fov)
+    source = pynoisy.forward.modulate(envelope, grf, alpha)
+
+    # Load EHT array and generate an empty Observation object
+    # Generate complex visibility meausrements with thermal noise added.
+    array = eh.array.load_txt(eht_array)
+    obs = pynoisy.observation.empty_eht_obs(array, nt=ntobs, tint=tint)
+    obs = pynoisy.observation.observe_same(source, obs, thermal_noise=thermal_noise)
+    if frac_noise > 0:
+        obs = obs.add_fractional_noise(frac_noise)
+
+    source_data = _xr.merge([grf, envelope, source])
+    if output_path:
+        solver.to_netcdf(output_path, group='solver')
+        source_data.to_netcdf(output_path, mode='a')
+    return obs, source_data
+
 
 def netcdf_attrs(attrs_dict, add_datetime=True, add_github_version=True):
     """
