@@ -118,7 +118,7 @@ def observe_same(movie, obs, ttype='nfft', output_path='./caltable', thermal_noi
         True for dterm noise
     sigmat: float,
         Correlation time for random station based errors
-    seed: int, default=6
+    seed: int, default=False
         Seed for the random number generators, uses system time if False
 
     Returns

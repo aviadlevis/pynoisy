@@ -17,7 +17,7 @@ def ring(ny, nx, fov=(1.0, 'unitless'), inner_radius=0.17, outer_radius=1.0, pho
             Number of (y/x)-axis grid points.
     fov: (float, str), default=(1.0, 'unitless')
         Field of view and units. Default is unitless 1.0.
-    inner_radius: float, default=0.2,
+    inner_radius: float, default=0.17,
         inner radius of the black-hole shadow.
     outer_radius: float, default=1.0,
         Cutoff outer radius for the exponential decay of flux. Beyond this radius the flux it cutoff to zero.
