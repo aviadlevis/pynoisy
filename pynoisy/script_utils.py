@@ -7,10 +7,9 @@ import xarray as _xr
 import time as _time
 import functools as _functools
 import itertools as _itertools
-import os as _os
 
-def estimate_envelope_mem(obs, movie_coords, total_flux=1.0, fwhm=80.0, FluxReg_w=1e5, MEMReg_w=2e5,
-                          output_path=None):
+
+def estimate_envelope_mem(obs, movie_coords, total_flux=1.0, fwhm=80.0, FluxReg_w=1e5, MEMReg_w=2e5):
 
     from scipy.optimize import minimize
 
@@ -44,45 +43,96 @@ def estimate_envelope_mem(obs, movie_coords, total_flux=1.0, fwhm=80.0, FluxReg_
     for op in reg_ops:
         envelope.attrs.update({type(op).__name__: op.w})
     envelope.name = 'envelope_estimate'
-
-    if output_path:
-        mode = 'a' if _os.path.exists(output_path) else 'w'
-        envelope.to_netcdf(output_path, mode=mode)
     return envelope
 
-def observations_from_correlation_angles(temporal_angle, spatial_angle, eht_array, tint=60.0,
-                                         tstart=4.0, tstop=15.5,ntobs=64, nt=64, ny=64, nx=64,
-                                         envelope_model=pynoisy.envelope.ring, total_flux=1.0,
-                                         fov=(160.0, 'uas'), alpha=2.0, thermal_noise=True,
-                                         frac_noise=0.05, seed=None, output_path=None):
+def movie_from_correlation_angles(temporal_angle, spatial_angle, nt=64, ny=64, nx=64,
+                                  envelope_model=pynoisy.envelope.ring, total_flux=1.0,
+                                  fov=(160.0, 'uas'), alpha=2.0, envelope_params={}, seed=None):
+    """
+    Generate a random movie from the spatial and temporal correlation angles.
 
-    import ehtim as eh
+    Parameters
+    ----------
+    temporal_angle : float,
+        Defines the opening angle of spirals with respect to the local radius
+    spatial_angle :
+        This angle defines the opening angle with respect to the local radius.
+        A negative angle rotates the velocity vector axis clockwise (-pi/2 = clockwise rotation)
+    nt, ny, nx : int,
+        Grid size
+    envelope_model : pynoisy.envelope, default=pynoisy.envelope.ring
+        A method which defines an envelope xr.DataArray (see pynoisy/envelope.py)
+    total_flux : float, default=1.0,
+        The total flux at each frame
+    fov : (float, str), default = (160.0, 'uas'),
+        The field of view and units.
+    alpha : float,
+        Exponential modulation parameter.
+    envelope_params : dict,
+        Additional parameters passed to the envelope model.
+    seed : int, default=None,
+        None samples as random seed.
+
+    Returns
+    -------
+    source_data: xr.Dataset,
+        A dataset containing the envelope GRF, and source movie.
+    """
 
     # Generate a stochastic video by modulating an envelope with a Gaussian Random Field.
     # Randomly sample the *true* underlying accretion parameters.
     diffusion = pynoisy.diffusion.general_xy(ny=ny, nx=nx, opening_angle=spatial_angle)
     advection = pynoisy.advection.general_xy(ny=ny, nx=nx, opening_angle=temporal_angle)
     solver = pynoisy.forward.HGRFSolver(advection, diffusion, nt=nt, seed=seed)
-    grf = solver.run().utils_image.set_fov(fov).utils_movie.set_time(tstart=tstart, tstop=tstop, units='UTC')
+    grf = solver.run().utils_image.set_fov(fov)
 
     # Generate source movie from envelope and GRF
-    envelope = envelope_model(ny=ny, nx=nx, total_flux=total_flux).utils_image.set_fov(fov)
+    envelope = envelope_model(ny=ny, nx=nx, total_flux=total_flux, **envelope_params).utils_image.set_fov(fov)
     source = pynoisy.forward.modulate(envelope, grf, alpha)
 
-    # Load EHT array and generate an empty Observation object
-    # Generate complex visibility meausrements with thermal noise added.
-    array = eh.array.load_txt(eht_array)
-    obs = pynoisy.observation.empty_eht_obs(array, nt=ntobs, tint=tint)
-    obs = pynoisy.observation.observe_same(source, obs, thermal_noise=thermal_noise)
+    source_data = _xr.merge([grf, envelope, source])
+    source_data.attrs.update(spatial_angle=spatial_angle, temporal_angle=temporal_angle, seed=seed)
+
+    return source_data
+
+def observations_from_movie(movie, array_path, tint=60.0, tstart=4.0, tstop=15.5, nt=64,
+                            thermal_noise=True, frac_noise=0.05, seed=False):
+    """
+    Load EHT array and generate an Observation object from the movie.
+
+    Parameters
+    ----------
+    array_path : str,
+        path to input array file
+    tint : float, default=60.0
+        Integration time
+    tstart: float, default=4.0
+        Start time of the observation in hours
+    tstop: float, default=15.5
+        End time of the observation in hours
+    nt : int,
+        Number of observational times
+    thermal_noise: bool
+        False for no thermal noise noise
+    frac_noise : float, default=0.05,
+        The fraction of noise to add.
+    seed: int, default=False
+        Seed for the random number generators, uses system time if False
+
+    Returns
+    -------
+
+    """
+    import ehtim as eh
+
+    movie = movie.utils_movie.set_time(tstart=tstart, tstop=tstop, units='UTC')
+
+    array = eh.array.load_txt(array_path)
+    obs = pynoisy.observation.empty_eht_obs(array, nt=nt, tint=tint, tstart=tstart, tstop=tstop)
+    obs = pynoisy.observation.observe_same(movie, obs, thermal_noise=thermal_noise, seed=seed)
     if frac_noise > 0:
         obs = obs.add_fractional_noise(frac_noise)
-
-    source_data = _xr.merge([grf, envelope, source])
-    if output_path:
-        solver.to_netcdf(output_path, group='solver')
-        source_data.to_netcdf(output_path, mode='a')
-    return obs, source_data
-
+    return obs
 
 def netcdf_attrs(attrs_dict, add_datetime=True, add_github_version=True):
     """
