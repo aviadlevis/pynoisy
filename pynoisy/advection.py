@@ -41,8 +41,8 @@ def general_xy(ny, nx, opening_angle=-_np.pi/2, r_cutoff=0.5, grid_start=(-10, -
     vx = magnitude * _np.cos(grid.theta + opening_angle)
 
     advection = _xr.Dataset(
-        data_vars={'vx': (['y','x'], vx),
-                   'vy': (['y','x'], vy)},
+        data_vars={'vx': (['y','x'], vx.data),
+                   'vy': (['y','x'], vy.data)},
         coords=grid.coords,
         attrs={'advection_model': 'general_xy',
                'opening_angle': opening_angle,

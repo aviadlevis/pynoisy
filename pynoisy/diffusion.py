@@ -61,9 +61,9 @@ def general_xy(ny, nx, opening_angle=_np.pi / 2 - _np.pi / 9, tau=1.0, lam=5.0, 
 
     diffusion = _xr.Dataset(
         data_vars={
-            'spatial_angle': (['y', 'x'], spatial_angle),
-            'correlation_time': (['y', 'x'], correlation_time),
-            'correlation_length': (['y', 'x'], correlation_length),
+            'spatial_angle': (['y', 'x'], spatial_angle.data),
+            'correlation_time': (['y', 'x'], correlation_time.data),
+            'correlation_length': (['y', 'x'], correlation_length.data),
             'tensor_ratio': tensor_ratio
         },
         coords=grid.coords,
