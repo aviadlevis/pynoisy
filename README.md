@@ -19,7 +19,7 @@ Clone pynoisy repository with the inoisy submodule
 git clone --recurse-submodules https://github.com/aviadlevis/pynoisy.git
 cd pynoisy
 ```
-Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
+Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. To install HYPRE, some version of MPI ([OpenMPI](https://www.open-mpi.org/)/[MPICH](https://www.mpich.org/)) needs to be installed. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
 ```
 git clone https://github.com/hypre-space/hypre.git
 cd hypre/src
