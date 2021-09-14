@@ -1,5 +1,5 @@
 bootstrap: docker
-from: continuumio/anaconda3
+from: jupyter/scipy-notebook
 
 %post
   # Set home directory variable
