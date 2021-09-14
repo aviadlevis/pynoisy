@@ -19,6 +19,12 @@ The installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/
 sudo apt-get install libgsl-dev
 sudo apt-get install gcc gfortran g++ make
 ```
+Installing OpenMPI with HDF5 on Ubuntu using apt worked (dated: 11/09/2021)
+```
+sudo apt update
+sudo apt install openmpi-bin openmpi-common openmpi-doc libopenmpi-dev
+sudo apt install libhdf5-openmpi-dev
+```
 ---
 **Installation:**
 
