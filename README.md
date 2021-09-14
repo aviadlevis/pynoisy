@@ -8,18 +8,26 @@ pynoisy can be used to generate 3D (spatio-temporal) Gaussian Random Fields (GRF
 EHT measurements are Very Large Baseline Intereferometric (VLBI) measurements which are synthesized using `eht-imaging` [5]. 
 
 
-Installation
+Installation (a non-complete guide)
 ----
 Installation using using [anaconda](https://www.anaconda.com/) package management.  
-The following installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and was tested on Linux Ubuntu 18.04.5.
-Alternatively, use [Singularity](https://sylabs.io/singularity/) to generate a container with MPI and conda as explained below.
+
+**Prerequisites:**
+
+The installation steps assume that MPI (e.g. [openmpi](https://www.open-mpi.org/), [mpich](https://www.mpich.org/)) is installed and was tested on Linux Ubuntu 18.04.5. For a self-contained list of instructions see the [Singularity](https://sylabs.io/singularity/) `.def` [file](https://github.com/aviadlevis/pynoisy/blob/master/pynoisy_mpi.def) which can be used to generate a container with MPI and conda as explained below. A partial list of the prerequisites include `gcc`, `gsl`, and `hdf5` which can be installed using
+```
+sudo apt-get install libgsl-dev
+sudo apt-get install gcc gfortran g++ make
+```
+---
+**Installation:**
 
 Clone pynoisy repository with the inoisy submodule
 ```
 git clone --recurse-submodules https://github.com/aviadlevis/pynoisy.git
 cd pynoisy
 ```
-Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. To install HYPRE, some version of MPI needs to be installed. Note that the installation was tested on [MPICH](https://www.mpich.org/) and not OpenMPI. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
+Clone and install [HYPRE](https://github.com/hypre-space/hypre) library. If HYPRE was previously installed make sure to have `HYPRE_DIR` point to the right path.
 ```
 git clone https://github.com/hypre-space/hypre.git
 cd hypre/src
