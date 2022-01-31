@@ -1,5 +1,17 @@
 pynoisy
 ---
+[**Project page**](http://imaging.cms.caltech.edu/stochastic_inference/) | [**Paper**](http://imaging.cms.caltech.edu/stochastic_inference/ICCV2021_main.pdf) | [**Supplemental material**](http://imaging.cms.caltech.edu/stochastic_inference/ICCV2021_supplementary.pdf)
+
+Aviad Levis, Daeyoung Lee, Joel A. Tropp, Charles F. Gammie, and Katherine L. Bouman (2021). "Inference of Black Hole Fluid-Dynamics from Sparse Interferometric Measurements." In Proceedings of the IEEE/CVF International Conference on Computer Vision, pp. 2340-2349. 2021.
+```
+@inproceedings{levis2021inference,
+      title={Inference of Black Hole Fluid-Dynamics from Sparse Interferometric Measurements},
+      author={Levis, Aviad and Lee, Daeyoung and Tropp, Joel A and Gammie, Charles F and Bouman, Katherine L},
+      booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+      pages={2340--2349},
+      year={2021}
+}
+```
 pynoisy is:
 1. A python wrapper for a modified version of the `inoisy` code [1] that supports arbitrary xarray matrices as diffusion tensor fields. 
 pynoisy can be used to generate 3D (spatio-temporal) Gaussian Random Fields (GRFs) as solutions to a stochastic partial differential equation [2,3] (SPDE), which is solved using `HYPRE` computing library [4]. `Tutorial1` within the tutorials directory gives a notebook example on generation of GRFs.
